@@ -342,9 +342,9 @@ class SkyKDE(ClusteredKDE):
             cells[-nrefine:] = zip(p, new_nside, new_ipix)
         return cells
 
-    def as_healpix(self):
+    def as_healpix(self, top_nside=16):
         """Returns a HEALPix multi-order map of the posterior density."""
-        post, nside, ipix = zip(*self._bayestar_adaptive_grid())
+        post, nside, ipix = zip(*self._bayestar_adaptive_grid(top_nside=top_nside))
         post = np.asarray(list(post))
         nside = np.asarray(list(nside))
         ipix = np.asarray(list(ipix))
