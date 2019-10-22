@@ -474,10 +474,10 @@ class Clustered3DSkyKDE(SkyKDE):
         coordinates, as a function of (ra, dec, distance)."""
         return super(Clustered3DSkyKDE, self).__call__(pts)
 
-    def as_healpix(self):
+    def as_healpix(self, top_nside=16):
         """Returns a HEALPix multi-order map of the posterior density
         and conditional distance distribution parameters."""
-        m = super(Clustered3DSkyKDE, self).as_healpix()
+        m = super(Clustered3DSkyKDE, self).as_healpix(top_nside=top_nside)
         order, ipix = moc.uniq2nest(m['UNIQ'])
         nside = 2 ** order.astype(int)
         theta, phi = hp.pix2ang(nside, ipix, nest=True)
