@@ -344,7 +344,8 @@ class SkyKDE(ClusteredKDE):
 
     def as_healpix(self, top_nside=16):
         """Returns a HEALPix multi-order map of the posterior density."""
-        post, nside, ipix = zip(*self._bayestar_adaptive_grid(top_nside=top_nside))
+        post, nside, ipix = zip(*self._bayestar_adaptive_grid(
+                                                        top_nside=top_nside))
         post = np.asarray(list(post))
         nside = np.asarray(list(nside))
         ipix = np.asarray(list(ipix))
