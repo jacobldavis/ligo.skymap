@@ -60,7 +60,8 @@ def parser():
                         default=True,
                         help='generate a multiresolution HEALPix map')
     parser.add_argument('--topnside', type=int, default=16,
-                        help='choose a start nside before HEALPix refinement steps (must be a valid nside)')
+                        help='choose a start nside before HEALPix refinement '
+                        'steps (must be a valid nside)')
     parser.add_argument('-j', '--jobs', type=int, default=1, const=None,
                         nargs='?', help='Number of threads')
     parser.add_argument('--instruments', metavar='H1|L1|V1|...', nargs='+',
