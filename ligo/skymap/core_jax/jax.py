@@ -1,5 +1,5 @@
 #
-# Copyright (C) 22025 Jacob Davis
+# Copyright (C) 2025 Jacob Davis
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,3 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
+import jax
+import jax.numpy as jnp
+
+def bsm_jax(min_distance, max_distance, prior_distance_power, 
+            cosmology, gmst, sample_rate, toas, snrs, responses, 
+            locations, horizons, rescale_loglikelihood):
+    return [jnp.zeros(12*16*16), 0, 0]
