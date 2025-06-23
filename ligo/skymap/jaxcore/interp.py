@@ -16,22 +16,21 @@
 #
 
 import numpy as np
+from jax import jit
 import jax.numpy as jnp
-import jax
+import time
 
 class cubic_interp:
     def __init__(self, data, n, tmin, dt):
-        self.f = 1 / dt
-        self.t0 = 3 - self.f * tmin
-        self.length = n + 6
-        self.a = self.compute_coeffs(data, n)
+        self.f = jnp.float32(1 / dt)
+        self.t0 = 3 - jnp.float32(self.f * tmin)
+        self.length = jnp.int32(n + 6)
+        idx = jnp.arange(self.length)
+        self.a = self.compute_coeffs(data, n, idx)
 
     @staticmethod
-    @jax.jit
-    def compute_coeffs(data, n):
-        length = n + 6
-        idx = jnp.arange(length)
-
+    @jit
+    def compute_coeffs(data, n, idx):
         # Clip indices
         z = jnp.stack([
             data[jnp.clip(idx - 4, 0, n - 1)],
@@ -60,15 +59,17 @@ class cubic_interp:
 
         return out
     
-    def cubic_interp_eval_jax(self, data):
-        x = jnp.clip(data * self.f + self.t0, 0.0, self.length - 1.0)
+    @staticmethod
+    @jit
+    def cubic_interp_eval_jax(data, f, t0, length, a):
+        x = jnp.clip(data * f + t0, 0.0, length - 1.0)
         ix = x.astype(int)
         x -= ix
         
-        a0 = self.a[ix, 0]
-        a1 = self.a[ix, 1]
-        a2 = self.a[ix, 2]
-        a3 = self.a[ix, 3]
+        a0 = a[ix, 0]
+        a1 = a[ix, 1]
+        a2 = a[ix, 2]
+        a3 = a[ix, 3]
 
         return ((a0 * x + a1) * x + a2) * x + a3
 
@@ -110,3 +111,15 @@ class bicubic_interp:
                                         0.5 * (a1[js][2] - a1[js][0]), a1[js][1]]
                 self.a[iss * self.xlength[0] + itt] = a
 
+def test_cubic_interp():
+    t = jnp.arange(-10.0, 10.0 + 0.01, 0.01)
+    test = cubic_interp(jnp.array([0,0,0,0]), 4, -1, 1)
+
+    _ = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
+
+    start = time.perf_counter()
+    result = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
+    end = time.perf_counter()
+    print(end-start)
+    print(result) # expected all 0s
+    
