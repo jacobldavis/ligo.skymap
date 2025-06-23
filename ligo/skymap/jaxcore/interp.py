@@ -113,11 +113,11 @@ def compute_coeffs(data, ns, nt):
             kt = jnp.clip(itt + jt - 4, 0, nt - 1)
             return data[ks * nt + kt]
 
-        return vmap(get_zt)(jnp.arange(4))  # z: (4,)
+        return vmap(get_zt)(jnp.arange(4))
 
     def compute_block(iss, itt):
-        a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(jnp.arange(4))  # (4,4)
-        return vmap(interpolate_1d)(a_rows.T)  # (4,4)
+        a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(jnp.arange(4))
+        return vmap(interpolate_1d)(a_rows.T)
 
     blocks = vmap(lambda iss: vmap(lambda itt: compute_block(iss, itt))(jnp.arange(length_t)))(jnp.arange(length_s))
     return blocks.reshape(length_s * length_t, 4, 4)
@@ -208,5 +208,4 @@ def test_bicubic_interp_1():
     end = time.perf_counter()
     print(end-start)
     print(result) # expect values 0 - 4
-
 
