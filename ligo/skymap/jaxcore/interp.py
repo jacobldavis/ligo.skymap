@@ -20,27 +20,47 @@ from jax import jit, vmap
 import jax
 import jax.numpy as jnp
 import time
+from functools import partial
 
 class cubic_interp:
     def __init__(self, data, n, tmin, dt):
         self.f = jnp.float32(1 / dt)
         self.t0 = 3 - jnp.float32(self.f * tmin)
         self.length = jnp.int32(n + 6)
-        self.a = []
-        for i in range(self.length):
-            z = [0,0,0,0]
-            for j in range(len(z)):
-                z[j] = data[min(max(i+j-4,0),n-1)]
-            if np.isnan(z[1]) or np.isinf(z[1]) or np.isnan(z[2]) or np.isinf(z[2]):
-                self.a.append([0,0,0,z[1]])
-            elif np.isnan(z[0]) or np.isinf(z[0]) or np.isnan(z[3]) or np.isinf(z[3]):
-                self.a.append([0,0,z[2]-z[1],z[1]])
-            else:
-                self.a.append([1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0]),
-                                z[0] - 2.5 * z[1] + 2 * z[2] - 0.5 * z[3],
-                                0.5 * (z[2] - z[0]), z[1]])
-        self.a = jnp.array(self.a)
-    
+        idx = jnp.arange(self.length)
+        self.a = self.compute_coeffs(data, n, idx)
+
+    @staticmethod
+    @jit
+    def compute_coeffs(data, n, idx):
+        # Clip indices
+        z = jnp.stack([
+            data[jnp.clip(idx - 4, 0, n - 1)],
+            data[jnp.clip(idx - 3, 0, n - 1)],
+            data[jnp.clip(idx - 2, 0, n - 1)],
+            data[jnp.clip(idx - 1, 0, n - 1)],
+        ], axis=1)
+
+        nan_or_inf = lambda x: jnp.isnan(x) | jnp.isinf(x)
+        bad_12 = nan_or_inf(z[:,1]) | nan_or_inf(z[:,2])
+        bad_03 = nan_or_inf(z[:,0]) | nan_or_inf(z[:,3])
+
+        # Compute coefficients
+        a0 = 1.5 * (z[:,1] - z[:,2]) + 0.5 * (z[:,3] - z[:,0])
+        a1 = z[:,0] - 2.5 * z[:,1] + 2 * z[:,2] - 0.5 * z[:,3]
+        a2 = 0.5 * (z[:,2] - z[:,0])
+        a3 = z[:,1]
+
+        # Initialize coefficients
+        out = jnp.stack([
+            jnp.where(bad_12, 0.0, jnp.where(bad_03, 0.0, a0)),
+            jnp.where(bad_12, 0.0, jnp.where(bad_03, 0.0, a1)),
+            jnp.where(bad_12, 0.0, jnp.where(bad_03, a2, a2)),
+            jnp.where(bad_12, z[:,1], a3),
+        ], axis=1)
+
+        return out
+
     @staticmethod
     @jit
     def cubic_interp_eval_jax(data, f, t0, length, a):
@@ -59,44 +79,55 @@ class cubic_interp:
 def cubic_eval(coeffs, x):
     return ((coeffs[..., 0] * x + coeffs[..., 1]) * x + coeffs[..., 2]) * x + coeffs[..., 3]
 
+@jit
+def nan_or_inf(x):
+    return jnp.isnan(x) | jnp.isinf(x)
+
+@jit
+def interpolate_1d(z):
+    bad12 = nan_or_inf(z[1]) | nan_or_inf(z[2])
+    bad03 = nan_or_inf(z[0]) | nan_or_inf(z[3])
+
+    a0 = 1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0])
+    a1 = z[0] - 2.5 * z[1] + 2 * z[2] - 0.5 * z[3]
+    a2 = 0.5 * (z[2] - z[0])
+    a3 = z[1]
+
+    return jnp.stack([
+        jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
+        jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
+        jnp.where(bad12, 0.0, jnp.where(bad03, a2, a2)),
+        jnp.where(bad12, z[1], a3)
+    ])
+
+@partial(jit, static_argnames=['ns', 'nt'])
+def compute_coeffs(data, ns, nt):
+    length_s = ns + 6
+    length_t = nt + 6
+    data = jnp.asarray(data)
+
+    def get_z(js, iss, itt):
+        ks = jnp.clip(iss + js - 4, 0, ns - 1)
+
+        def get_zt(jt):
+            kt = jnp.clip(itt + jt - 4, 0, nt - 1)
+            return data[ks * nt + kt]
+
+        return vmap(get_zt)(jnp.arange(4))  # z: (4,)
+
+    def compute_block(iss, itt):
+        a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(jnp.arange(4))  # (4,4)
+        return vmap(interpolate_1d)(a_rows.T)  # (4,4)
+
+    blocks = vmap(lambda iss: vmap(lambda itt: compute_block(iss, itt))(jnp.arange(length_t)))(jnp.arange(length_s))
+    return blocks.reshape(length_s * length_t, 4, 4)
+
 class bicubic_interp:
     def __init__(self, data, ns, nt, smin, tmin, ds, dt):
         self.fx = jnp.array([jnp.float32(1/ds), jnp.float32(1/dt)])
         self.x0 = jnp.array([jnp.float32(3 - self.fx[0] * smin), jnp.float32(3 - self.fx[1] * tmin)])
         self.xlength = jnp.array([jnp.int32(ns + 6), jnp.int32(nt + 6)])
-        self.a = np.zeros((self.xlength[0]*self.xlength[1], 4, 4), dtype=np.float64)
-        for iss in range(self.xlength[0]):
-            for itt in range(self.xlength[1]):
-                a = np.zeros((4, 4), dtype=np.float64)
-                a1 = np.zeros((4, 4), dtype=np.float64)
-                for js in range(4):
-                    z = np.zeros(4, dtype=np.float64)
-                    ks = np.clip(iss + js - 4, 0, ns - 1)
-                    for jt in range(4):
-                        kt = np.clip(itt + jt - 4, 0, nt - 1)
-                        z[jt] = data[ks * ns + kt]
-                        if np.isnan(z[1]) or np.isinf(z[1]) or np.isnan(z[2]) or np.isinf(z[2]):
-                            a[js] = [0,0,0,z[1]]
-                        elif np.isnan(z[0]) or np.isinf(z[0]) or np.isnan(z[3]) or np.isinf(z[3]):
-                            a[js] = [0,0,z[2]-z[1],z[1]]
-                        else:
-                            a[js] = [1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0]),
-                                            z[0] - 2.5 * z[1] + 2 * z[2] - 0.5 * z[3],
-                                            0.5 * (z[2] - z[0]), z[1]]
-                for js in range(4):
-                    for jt in range(4):
-                        a1[js][jt] = a[jt][js]
-                for js in range(4):
-                    if np.isnan(a1[3][1]) or np.isinf(a1[3][1]) or np.isnan(a1[3][2]) or np.isinf(a1[3][2]):
-                        a[js] = [0,0,0,a1[js][1]]
-                    elif np.isnan(a1[3][0]) or np.isinf(a1[3][0]) or np.isnan(a1[3][3]) or np.isinf(a1[3][3]):
-                        a[js] = [0,0,a1[js][2]-a1[js][1],a1[js][1]]
-                    else:
-                        a[js] = [1.5 * (a1[js][1] - a1[js][2]) + 0.5 * (a1[js][3] - a1[js][0]),
-                                        a1[js][0] - 2.5 * a1[js][1] + 2 * a1[js][2] - 0.5 * a1[js][3],
-                                        0.5 * (a1[js][2] - a1[js][0]), a1[js][1]]
-                self.a[iss * self.xlength[0] + itt] = a
-        self.a = jnp.array(self.a)
+        self.a = compute_coeffs(data,ns,nt)
 
     @staticmethod
     @jit
@@ -178,4 +209,4 @@ def test_bicubic_interp_1():
     print(end-start)
     print(result) # expect values 0 - 4
 
-test_bicubic_interp_1()
+

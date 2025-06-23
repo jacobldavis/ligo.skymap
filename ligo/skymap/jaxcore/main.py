@@ -16,7 +16,7 @@
 #
 import jax
 import jax.numpy as jnp
-import interp
+from interp import *
 
 def bsm_jax(min_distance, max_distance, prior_distance_power, 
             cosmology, gmst, sample_rate, toas, snrs, responses, 
