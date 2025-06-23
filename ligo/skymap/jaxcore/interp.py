@@ -88,11 +88,13 @@ def interpolate_1d(z):
     bad12 = nan_or_inf(z[1]) | nan_or_inf(z[2])
     bad03 = nan_or_inf(z[0]) | nan_or_inf(z[3])
 
+    # Compute coefficients
     a0 = 1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0])
     a1 = z[0] - 2.5 * z[1] + 2 * z[2] - 0.5 * z[3]
     a2 = 0.5 * (z[2] - z[0])
     a3 = z[1]
 
+    # Initialize coefficients
     return jnp.stack([
         jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
         jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
@@ -104,7 +106,6 @@ def interpolate_1d(z):
 def compute_coeffs(data, ns, nt):
     length_s = ns + 6
     length_t = nt + 6
-    data = jnp.asarray(data)
 
     def get_z(js, iss, itt):
         ks = jnp.clip(iss + js - 4, 0, ns - 1)
@@ -161,7 +162,7 @@ class bicubic_interp:
 
 def test_cubic_interp_0():
     t = jnp.arange(-10.0, 10.0 + 0.01, 0.01)
-    test = cubic_interp([0,0,0,0], 4, -1, 1)
+    test = cubic_interp(jnp.array([0,0,0,0]), 4, -1, 1)
 
     _ = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
 
@@ -172,8 +173,8 @@ def test_cubic_interp_0():
     print(result) # expected all 0s
 
 def test_cubic_interp_1():
-    t = jnp.arange(0, 1 + 0.01, 0.01)
-    test = cubic_interp([1,0,1,4], 4, -1, 1)
+    t = jnp.arange(0, 2 + 0.01, 0.01)
+    test = cubic_interp(jnp.array([1,0,1,4]), 4, -1, 1)
 
     _ = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
 
@@ -186,7 +187,7 @@ def test_cubic_interp_1():
 def test_bicubic_interp_0():
     s = jnp.arange(0, 2 + 0.01, 0.01)
     t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = bicubic_interp([-1,-1,-1,-1,0,0,0,0,1,1,1,1,2,2,2,2],4,4,-1,-1,1,1)
+    test = bicubic_interp(jnp.array([-1,-1,-1,-1,0,0,0,0,1,1,1,1,2,2,2,2]),4,4,-1,-1,1,1)
 
     _ = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
 
@@ -199,7 +200,7 @@ def test_bicubic_interp_0():
 def test_bicubic_interp_1():
     s = jnp.arange(0, 2 + 0.01, 0.01)
     t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = bicubic_interp([1,1,1,1,0,0,0,0,1,1,1,1,4,4,4,4],4,4,-1,-1,1,1)
+    test = bicubic_interp(jnp.array([1,1,1,1,0,0,0,0,1,1,1,1,4,4,4,4]),4,4,-1,-1,1,1)
 
     _ = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
 
@@ -208,4 +209,3 @@ def test_bicubic_interp_1():
     end = time.perf_counter()
     print(end-start)
     print(result) # expect values 0 - 4
-
