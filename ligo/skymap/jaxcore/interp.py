@@ -111,7 +111,7 @@ class bicubic_interp:
                                         0.5 * (a1[js][2] - a1[js][0]), a1[js][1]]
                 self.a[iss * self.xlength[0] + itt] = a
 
-def test_cubic_interp():
+def test_cubic_interp_0():
     t = jnp.arange(-10.0, 10.0 + 0.01, 0.01)
     test = cubic_interp(jnp.array([0,0,0,0]), 4, -1, 1)
 
@@ -122,4 +122,16 @@ def test_cubic_interp():
     end = time.perf_counter()
     print(end-start)
     print(result) # expected all 0s
-    
+
+
+def test_cubic_interp_1():
+    t = jnp.arange(0, 1 + 0.01, 0.01)
+    test = cubic_interp(jnp.array([1,0,1,4]), 4, -1, 1)
+
+    _ = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
+
+    start = time.perf_counter()
+    result = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
+    end = time.perf_counter()
+    print(end-start)
+    print(result) # expected all squared values
