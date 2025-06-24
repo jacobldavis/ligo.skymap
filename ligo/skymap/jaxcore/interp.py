@@ -33,7 +33,7 @@ class cubic_interp:
     @staticmethod
     @jit
     def compute_coeffs(data, n, idx):
-        # Clip indices
+        # Clip indices and build z
         z = jnp.stack([
             data[jnp.clip(idx - 4, 0, n - 1)],
             data[jnp.clip(idx - 3, 0, n - 1)],
@@ -75,6 +75,8 @@ class cubic_interp:
 
         return ((a0 * x + a1) * x + a2) * x + a3
 
+ARANGE4 = jnp.arange(4)
+
 @jit
 def cubic_eval(coeffs, x):
     return ((coeffs[..., 0] * x + coeffs[..., 1]) * x + coeffs[..., 2]) * x + coeffs[..., 3]
@@ -114,7 +116,7 @@ def compute_coeffs(data, ns, nt):
             kt = jnp.clip(itt + jt - 4, 0, nt - 1)
             return data[ks * nt + kt]
 
-        return vmap(get_zt)(jnp.arange(4))
+        return vmap(get_zt)(ARANGE4)
 
     def compute_block(iss, itt):
         a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(jnp.arange(4))
@@ -134,11 +136,7 @@ class bicubic_interp:
     @jit
     def bicubic_interp_eval_jax(s, t, fx, x0, xlength, a):
         s = jnp.asarray(s)
-        t = jnp.asarray(t)
-        fx = jnp.asarray(fx)           
-        x0 = jnp.asarray(x0)          
-        xlength = jnp.asarray(xlength) 
-        a = jnp.asarray(a)           
+        t = jnp.asarray(t)         
         x = jnp.stack([s, t], axis=-1)  
 
         def eval_point(x):
