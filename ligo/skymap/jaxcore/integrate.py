@@ -147,7 +147,7 @@ def bessel_I0_scaled(x):
 
 @jit 
 def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
-    ret = jnp.log(bessel_I0_scaled(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p / r - 0.5 * b / p)
+    ret = jnp.log(bessel_I0_scaled(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p / r - 0.5 * b / p, 2)
     return jnp.where(cosmology, ret + log_dVC_dVL(r, x_knots, coeffs), ret)
 
 @jit
@@ -164,9 +164,9 @@ w64 = jnp.array(w64)
 
 # gsl_integration_qagp
 @jit
-def fixed_interval_quad(f, a, b):
+def fixed_interval_quad(a, b):
     t = 0.5 * (x64 + 1) * (b - a) + a
-    return 0.5 * (b - a) * jnp.sum(w64 * f(t))
+    return 0.5 * (b - a) * jnp.sum(w64 * jnp.exp(-t**2))
 
 @jit
 def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
@@ -182,16 +182,24 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     breakpoints, nbreakpoints = compute_breakpoints(p, b, r1, r2)
     
     # Re-scale the integrand
-    log_offset = jnp.max(vmap(lambda i: log_radial_integrand(breakpoints[i],p,b,k,cosmology,x_knots,coeffs))(jnp.arange(nbreakpoints)))
+    def log_integrand(r): return log_radial_integrand(r,p,b,k,cosmology,x_knots,coeffs)
+    log_vals = vmap(log_integrand)(breakpoints)
+    log_offset = jnp.max(log_vals)
     log_offset = jnp.where(log_offset == -float('inf'), 0, log_offset)
 
-    # Perform Gaussian quadrature
-    def integral_segment(i):
-        a_ = breakpoints[i]
-        b_ = breakpoints[i + 1]
-        return fixed_interval_quad(lambda r: radial_integrand(r,p,b,k,cosmology,x_knots,coeffs,-log_offset), a_, b_)
+    MAX_BREAKPOINTS = 5
+    breakpoints = jnp.pad(breakpoints, (0, MAX_BREAKPOINTS - breakpoints.shape[0]), constant_values=0.0)
+    mask = jnp.arange(MAX_BREAKPOINTS - 1) < (nbreakpoints - 1)
 
-    result = jnp.sum(vmap(integral_segment)(jnp.arange(nbreakpoints - 1)))
+    # Perform Gaussian quadrature
+    @jit
+    def integral_segment(i):
+        a = breakpoints[i]
+        b = breakpoints[i+1]
+        return fixed_interval_quad(a, b)
+
+    segments = vmap(integral_segment)(jnp.arange(MAX_BREAKPOINTS - 1))
+    result = jnp.sum(segments * mask)
 
     return log_offset + jnp.log(result)
 
@@ -201,7 +209,7 @@ class log_radial_integrator:
         alpha = 4
         p0 = 0.5 * r2 if k >= 0 else 0.5 * r1
         xmax = jnp.log(pmax)
-        x0 = jnp.min(jnp.log(p0), xmax)
+        x0 = min(jnp.log(p0), xmax)
         xmin = x0 - (1 + SQRT_2) * alpha
         self.ymax = x0 + alpha
         ymin = 2 * x0 - SQRT_2 * alpha - xmax
@@ -249,10 +257,12 @@ class log_radial_integrator:
 
         return jnp.where(p > 0, result, integrator.p0_limit)
 
+def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
+    p = jnp.sqrt(p2)
+    integrator = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
+    print(integrator.log_radial_integrator_eval(integrator, p, b, jnp.log(p), jnp.log(b)))
 
-# typedef struct {
-#     bicubic_interp *region0;
-#     cubic_interp *region1;
-#     cubic_interp *region2;
-#     double ymax, vmax, p0_limit;
-# } log_radial_integrator;
+test_log_radial_integral(0, 0, 0, 1, 0, 0, 0)
+
+#TODO: change args of log_radial_integrator_eval
+#make initialization not as slow
