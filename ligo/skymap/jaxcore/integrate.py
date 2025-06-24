@@ -221,6 +221,33 @@ class log_radial_integrator:
         self.region1 = cubic_interp(z1, size, xmin, d)
         z2 = vmap(lambda i: z0[i][size - 1 - i])(jnp.arange(size))
         self.region2 = cubic_interp(z2, size, umin, d)
+    
+    @staticmethod
+    @jit
+    def log_radial_integrator_eval(integrator, p, b, log_p, log_b):
+        x = log_p 
+        y = jnp.ln(2) + 2 * log_p - log_b
+        result = jnp.pow(0.5 * b / p, 2)
+        result += jnp.where(y >= integrator.ymax, 
+                            cubic_interp.cubic_interp_eval_jax(x, 
+                                                               integrator.region1.f, 
+                                                               integrator.region1.t0, 
+                                                               integrator.region1.length, 
+                                                               integrator.region1.a),
+                            jnp.where((0.5 * (x + y)) <= integrator.vmax),
+                            cubic_interp.cubic_interp_eval_jax(0.5 * (x-y),
+                                                               integrator.region2.f,
+                                                               integrator.region2.t0,
+                                                               integrator.region2.length,
+                                                               integrator.region2.a),
+                            bicubic_interp.bicubic_interp_eval_jax(x,
+                                                                   y,
+                                                                   integrator.region0.fx,
+                                                                   integrator.region0.x0,
+                                                                   integrator.region0.xlength,
+                                                                   integrator.region0.a))
+
+        return jnp.where(p > 0, result, integrator.p0_limit)
 
 
 # typedef struct {
