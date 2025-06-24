@@ -198,7 +198,7 @@ def test_bicubic_interp_0():
 def test_bicubic_interp_1():
     s = jnp.arange(0, 2 + 0.01, 0.01)
     t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = bicubic_interp(jnp.array([1,1,1,1,0,0,0,0,1,1,1,1,4,4,4,4]),4,4,-1,-1,1,1)
+    test = bicubic_interp(jnp.array([-1,-1,-1,-1,0,0,0,0,1,1,1,1,8,8,8,8]),4,4,-1,-1,1,1)
 
     _ = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
 
@@ -206,4 +206,4 @@ def test_bicubic_interp_1():
     result = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
     end = time.perf_counter()
     print(end-start)
-    print(result) # expect values 0 - 4
+    print(result) # expect values 0 - 8
