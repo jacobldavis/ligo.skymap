@@ -140,6 +140,7 @@ class bicubic_interp:
         x = jnp.stack([s, t], axis=-1)  
 
         def eval_point(x):
+            x = jnp.atleast_1d(x)
             is_nan = jnp.isnan(x[0]) | jnp.isnan(x[1])
 
             x_scaled = x * fx + x0
@@ -157,6 +158,8 @@ class bicubic_interp:
             return jnp.where(is_nan, x[0] + x[1], result)
 
         return vmap(eval_point)(x)
+
+# --- TEST SUITE ---
 
 def test_cubic_interp_0():
     t = jnp.arange(-10.0, 10.0 + 0.01, 0.01)
@@ -191,6 +194,7 @@ def test_bicubic_interp_0():
 
     start = time.perf_counter()
     result = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
+    print(jnp.shape(result))
     end = time.perf_counter()
     print(end-start)
     print(result) # expect values 0 - 2
