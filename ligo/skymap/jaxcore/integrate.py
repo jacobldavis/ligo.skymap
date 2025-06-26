@@ -314,5 +314,5 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     print(f"QuadAx result: {log_result_quadax}")
     print(f"QuadAx time: {end-start}")
 
-test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
+# test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
 

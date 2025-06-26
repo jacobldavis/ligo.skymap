@@ -17,6 +17,10 @@
 
 import math
 
+def ang2vec(theta, phi):
+    sz = math.sin(theta)
+    return [sz * math.cos(phi), sz * math.sin(phi), math.cos(theta)]
+
 def nest2uniq64(order, nest):
     return -1 if nest < 0 else nest + (1 << 2 * (order + 1))
 
@@ -30,7 +34,8 @@ def uniq2order64(uniq):
 
 def uniq2nest64(uniq):
     order = uniq2order64(uniq)
-    nest = -1 if order < 0 else nest = uniq - (1 << 2 * (order + 1))
+    if (order < 0): nest = -1 
+    else: nest = uniq - (1 << 2 * (order + 1))
     return order, nest
 
 def build_ctab() -> list[int]:
