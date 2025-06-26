@@ -107,7 +107,6 @@ def bessel_I0_scaled(x):
 
 @jit 
 def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
-    r = jnp.maximum(r, 1e-10)
     ret = jnp.log(bessel_I0_scaled(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p/r - 0.5 * b/p, 2)
     return jnp.where(cosmology, ret + log_dVC_dVL(r, x_knots, coeffs), ret)
 
@@ -118,10 +117,6 @@ def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
 
     multiplier = bessel_I0_scaled(b / r) * jnp.power(r, k)
     return jnp.where(cosmology, jnp.exp(ret + log_dVC_dVL(r, x_knots, coeffs)) * multiplier, jnp.exp(ret) * multiplier)
-
-x64, w64 = leggauss(64)
-x64 = jnp.array(x64)
-w64 = jnp.array(w64)
 
 @jit
 def compute_breakpoints(p, b, r1, r2):
@@ -167,51 +162,33 @@ def compute_breakpoints(p, b, r1, r2):
         operand=(breakpoints, n)
     )
 
-    return breakpoints, nbreakpoints
+    return breakpoints, nbreakpoints                
 
-# gsl_integration_qagp
-def gaussian_quad_integrate(func, a, b):
-    t = 0.5 * (x64 + 1) * (b - a) + a
-    w = 0.5 * (b - a) * w64
-    return jnp.sum(w * func(t))                  
-
-#@jit
+@jit
 def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
-    # Determine p and b
+    # Compute p and b
     x = xmin + ix * d
     y = ymin + iy * d 
     p = jnp.exp(x)
-    b = 2 * (p ** 2) / jnp.exp(y)
-    log_offset = -float('inf')
-    result = 0
+    b = 2 * (jnp.pow(p, 2)) / jnp.exp(y)
 
-    # Determine breakpoints
+    # Determine breakpoints and log_offset
     breakpoints, nbreakpoints = compute_breakpoints(p, b, r1, r2)
-    
-    # Re-scale the integrand
-    def log_integrand(r): return log_radial_integrand(r,p,b,k,cosmology,x_knots,coeffs)
+    def log_integrand(r):
+        return log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs)
+
     log_vals = vmap(log_integrand)(breakpoints)
     log_vals = jnp.where(jnp.isnan(log_vals), -jnp.inf, log_vals)
     log_offset = jnp.max(log_vals)
-    log_offset = jnp.where(log_offset == -float('inf'), 0.0, log_offset)
-    print(log_offset)
+    log_offset = jnp.where(log_offset == -jnp.inf, 0.0, log_offset)
 
-    MAX_BREAKPOINTS = 5
-    breakpoints = jnp.pad(breakpoints, (0, MAX_BREAKPOINTS - breakpoints.shape[0]), constant_values=0.0)
-    mask = jnp.arange(MAX_BREAKPOINTS - 1) < (nbreakpoints - 1)
+    def integrand(r):
+        return jnp.exp(log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, -log_offset))
 
-    # Perform Gaussian quadrature
-    @jit
-    def integral_segment(i):
-        a_b = breakpoints[i]
-        b_b = breakpoints[i + 1]
-        f = lambda r: radial_integrand(r, p, b, k, cosmology, x_knots, coeffs) - log_offset
-        return gaussian_quad_integrate(f, a_b, b_b)
+    # Adaptive quadrature
+    result, _ = quadgk(integrand, [r1,r2], epsabs=1e-8)
 
-    segments = vmap(integral_segment)(jnp.arange(MAX_BREAKPOINTS - 1))
-    result = jnp.sum(segments * mask)
-
-    return jnp.where(result > 0, log_offset + jnp.log(result), jnp.nan)
+    return jnp.log(result) + log_offset
 
 class log_radial_integrator:
     def __init__(self, r1, r2, k, cosmology, pmax, size):
@@ -232,7 +209,6 @@ class log_radial_integrator:
         # Create data arrays for initializing interps
         z0 = vmap(lambda ix: vmap(lambda iy: log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology))(jnp.arange(size)))(jnp.arange(size))
         z0_flat = jnp.ravel(z0)
-        print(z0_flat)
 
         # Initialize the interps
         self.region0 = bicubic_interp(z0_flat, size, size, xmin, ymin, d, d)
@@ -241,7 +217,6 @@ class log_radial_integrator:
         z2 = vmap(lambda i: z0[i][size - 1 - i])(jnp.arange(size))
         self.region2 = cubic_interp(z2, size, umin, d)
     
-    # TODO: change the params to tuples if desired
     @staticmethod
     @jit
     def log_radial_integrator_eval(fx, x0, xlength, a, 
@@ -273,7 +248,9 @@ class log_radial_integrator_quadax:
             return radial_integrand(r, p, b, k, 0, x_knots, coeffs)
         result_quadax, err = quadgk(integrand, [r1,r2], epsabs=1e-8)
         return result_quadax
-    
+
+# --- QUADAX IMPLEMENTATION END ---
+
 # --- TEST SUITE ---
 
 def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
@@ -315,4 +292,7 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     print(f"QuadAx time: {end-start}")
 
 # test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
-
+# test_log_radial_integral(0.432919, 1e-3, 1, 2, 1, 0, 2)
+# test_log_radial_integral(-2.76076, 1e-3, 0, 1, 1, 0, 2)
+# test_log_radial_integral(61.07118, 1e-3, 0, 1e9, 1, 0, 2)
+# test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
