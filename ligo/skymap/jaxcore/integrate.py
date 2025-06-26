@@ -17,7 +17,6 @@
 
 import numpy as np
 from numpy.polynomial.legendre import leggauss
-from scipy.integrate import quad
 from jax import jit, vmap, lax
 from jax.scipy.special import i0
 import jax
@@ -27,7 +26,7 @@ import timeit
 from functools import partial
 from interp import *
 from cosmology import *
-from quadax import quadgk
+from quadax import quadgk # type: ignore
 
 SQRT_2 = jnp.sqrt(2)
 ETA = 0.01
@@ -101,6 +100,29 @@ def log_dVC_dVL(DL, x_knots, coeffs):
 
 # --- COSMOLOGY END ---
 
+# gsl_sf_bessel_I0_scaled
+@jit
+def bessel_I0_scaled(x):
+    return jnp.exp(-jnp.abs(x)) * i0(x)
+
+@jit 
+def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
+    r = jnp.maximum(r, 1e-10)
+    ret = jnp.log(bessel_I0_scaled(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p/r - 0.5 * b/p, 2)
+    return jnp.where(cosmology, ret + log_dVC_dVL(r, x_knots, coeffs), ret)
+
+@jit
+def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
+    x = p / r - 0.5 * b / p
+    ret = scale - x**2
+
+    multiplier = bessel_I0_scaled(b / r) * jnp.power(r, k)
+    return jnp.where(cosmology, jnp.exp(ret + log_dVC_dVL(r, x_knots, coeffs)) * multiplier, jnp.exp(ret) * multiplier)
+
+x64, w64 = leggauss(64)
+x64 = jnp.array(x64)
+w64 = jnp.array(w64)
+
 @jit
 def compute_breakpoints(p, b, r1, r2):
     eta = 0.01
@@ -147,36 +169,13 @@ def compute_breakpoints(p, b, r1, r2):
 
     return breakpoints, nbreakpoints
 
-# gsl_sf_bessel_I0_scaled
-@jit
-def bessel_I0_scaled(x):
-    return jnp.exp(-jnp.abs(x)) * i0(x)
-
-@jit 
-def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
-    r = jnp.maximum(r, 1e-10)
-    ret = jnp.log(bessel_I0_scaled(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p/r - 0.5 * b/p, 2)
-    return jnp.where(cosmology, ret + log_dVC_dVL(r, x_knots, coeffs), ret)
-
-@jit
-def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
-    x = p / r - 0.5 * b / p
-    ret = scale - x**2
-
-    multiplier = bessel_I0_scaled(b / r) * jnp.power(r, k)
-    return jnp.where(cosmology, jnp.exp(ret + log_dVC_dVL(r, x_knots, coeffs)) * multiplier, jnp.exp(ret) * multiplier)
-
-x64, w64 = leggauss(64)
-x64 = jnp.array(x64)
-w64 = jnp.array(w64)
-
 # gsl_integration_qagp
 def gaussian_quad_integrate(func, a, b):
     t = 0.5 * (x64 + 1) * (b - a) + a
     w = 0.5 * (b - a) * w64
     return jnp.sum(w * func(t))                  
 
-@jit
+#@jit
 def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     # Determine p and b
     x = xmin + ix * d
@@ -195,6 +194,7 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     log_vals = jnp.where(jnp.isnan(log_vals), -jnp.inf, log_vals)
     log_offset = jnp.max(log_vals)
     log_offset = jnp.where(log_offset == -float('inf'), 0.0, log_offset)
+    print(log_offset)
 
     MAX_BREAKPOINTS = 5
     breakpoints = jnp.pad(breakpoints, (0, MAX_BREAKPOINTS - breakpoints.shape[0]), constant_values=0.0)
@@ -260,6 +260,7 @@ class log_radial_integrator:
         return jnp.where(p > 0, result, p0_limit)
 
 # --- QUADAX IMPLEMENTATION ---
+
 class log_radial_integrator_quadax:
     def __init__(self, r1, r2, k):
         self.r1 = r1
@@ -282,7 +283,7 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     start = time.perf_counter()
     integrator = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
     end = time.perf_counter()
-    print(f"JAX init time: {end - start:.4f} s")
+    print(f"JAX init time: {end - start}")
 
     result_jax_compile = integrator.log_radial_integrator_eval(
         integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a,
@@ -313,5 +314,5 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     print(f"QuadAx result: {log_result_quadax}")
     print(f"QuadAx time: {end-start}")
 
-test_log_radial_integral(-2.76076, 1e-3, 0, 1, 1, 0, 2)
+test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
 
