@@ -85,6 +85,11 @@ def toa_errors(theta, phi, gmst, nifos, locs, toas):
     return dt
 
 @jit
+def bayestar_signal_amplitude_model(F, exp_i_twopsi, u, u2):
+    tmp = F * jnp.conj(exp_i_twopsi)
+    return 0.5 * (1 + u2) * jnp.real(tmp) - 1j * u * jnp.imag(tmp)
+
+@jit
 def compute_samplewise_b(z_times_r, snrs_interp_sample, rescale_loglikelihood):
     I0arg = jnp.sum(jnp.conj(z_times_r) * snrs_interp_sample)
     b_val = jnp.abs(I0arg) * rescale_loglikelihood**2
@@ -115,9 +120,11 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
     return vmap(process_u)(jnp.arange(u_points_weights.shape[0]))
 
 @jit
-def bayestar_signal_amplitude_model(F, exp_i_twopsi, u, u2):
-    tmp = F * jnp.conj(exp_i_twopsi)
-    return 0.5 * (1 + u2) * jnp.real(tmp) - 1j * u * jnp.imag(tmp)
+def compute_accum(iint, nsamples, value, accum):
+    max_accum = -jnp.inf
+    max_accum = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: jnp.where(accum[iint][itwopsi][iu][isample] > max_accum, accum[iint][itwopsi][iu][isample], max_accum))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum1 = jnp.sum(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: jnp.exp(accum[iint][itwopsi][iu][isample] - max_accum))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
+    value[iint] = jnp.log(accum1) + max_accum
 
 def bayestar_smtps_pixel(integrators, nint, uniq, value, gmst, nifos, nsamples, sample_rate,
                          epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
@@ -145,7 +152,7 @@ def bayestar_smtps_pixel(integrators, nint, uniq, value, gmst, nifos, nsamples, 
     accum = vmap(lambda iint: vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: u_points_weights[iu][1] + log_radial_integrator_quadax.log_radial_integrator_eval_quadax(integrators[iint].r1, integrators[iint].r2, p[itwopsi][iu], b[itwopsi][iu], integrators[iint].k))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))(jnp.arange(nint))
 
     # Compute the final value with max_accum and accum1
-
+    vmap(lambda iint: compute_accum(iint, nsamples, value, accum))(jnp.arange(nint))
 
 # --- TESTS ---
 def test_eval_snr():
