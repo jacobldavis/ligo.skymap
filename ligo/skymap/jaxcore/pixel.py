@@ -43,7 +43,8 @@ u_points_weights = u_points_weights_init(nu)
 
 class bayestar_pixel:
     def __init__(self, nest, order):
-        self.uniq = nest + (1 << 2 * (order + 1))
+        self.uniq = nest2uniq64(order, nest)
+        self.value = [0,0,0]
 
 @jit
 def antenna_factor(D, ra, dec, gmst):
@@ -126,8 +127,8 @@ def compute_accum(iint, nsamples, value, accum):
     accum1 = jnp.sum(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: jnp.exp(accum[iint][itwopsi][iu][isample] - max_accum))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
     value[iint] = jnp.log(accum1) + max_accum
 
-def bayestar_smtps_pixel(integrators, nint, uniq, value, gmst, nifos, nsamples, sample_rate,
-                         epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+@jit
+def bsm_pixel_jax(integrators, nint, uniq, value, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     # Initialize starting values
     theta, phi = uniq2ang64(uniq) 
 
