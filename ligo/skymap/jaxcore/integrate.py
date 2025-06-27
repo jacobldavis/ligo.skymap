@@ -18,7 +18,7 @@
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 from jax import jit, vmap, lax
-from jax.scipy.special import i0
+from jax.scipy.special import i0e
 import jax
 import jax.numpy as jnp
 import time
@@ -103,7 +103,7 @@ def log_dVC_dVL(DL, x_knots, coeffs):
 # gsl_sf_bessel_I0_scaled
 @jit
 def bessel_I0_scaled(x):
-    return jnp.exp(-jnp.abs(x)) * i0(x)
+    return i0e(x)
 
 @jit 
 def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
@@ -257,6 +257,7 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     p = jnp.sqrt(p2)
 
     print("==> JAX VERSION:")
+    integratora = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
     start = time.perf_counter()
     integrator = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
     end = time.perf_counter()
@@ -292,7 +293,9 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     print(f"QuadAx time: {end-start}")
 
 # test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
-# test_log_radial_integral(0.432919, 1e-3, 1, 2, 1, 0, 2)
-# test_log_radial_integral(-2.76076, 1e-3, 0, 1, 1, 0, 2)
+# test_log_radial_integral(jnp.log(63), 0, 3, 6, 0, 0, 2)
+# test_log_radial_integral(-2.76076, 1e-3, 1e-6, 1, 1, 0, 2)
 # test_log_radial_integral(61.07118, 1e-3, 0, 1e9, 1, 0, 2)
 # test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
+# test_log_radial_integral(2.94085, 1e-4, 1, 4, 1, 1, 2)
+# test_log_radial_integral(2.94545, 1e-4, 0.5, 4, 1, 1, 2)
