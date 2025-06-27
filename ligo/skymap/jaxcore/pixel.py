@@ -150,6 +150,7 @@ def bsm_pixel_jax(integrators, nint, uniq, value, gmst, nifos, nsamples, sample_
     p, log_p, b, log_b = vmap(process_twopsi)(jnp.arange(ntwopsi))
     
     # Initialize accum with the integrator evaluation
+    # TODO: Modify integrator function later
     accum = vmap(lambda iint: vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: u_points_weights[iu][1] + log_radial_integrator_quadax.log_radial_integrator_eval_quadax(integrators[iint].r1, integrators[iint].r2, p[itwopsi][iu], b[itwopsi][iu], integrators[iint].k))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))(jnp.arange(nint))
 
     # Compute the final value with max_accum and accum1
