@@ -41,11 +41,6 @@ def u_points_weights_init(nu):
 
 u_points_weights = u_points_weights_init(nu)
 
-class bayestar_pixel:
-    def __init__(self, nest, order):
-        self.uniq = nest2uniq64(order, nest)
-        self.value = [0,0,0]
-
 @jit
 def antenna_factor(D, ra, dec, gmst):
     gha = gmst - ra
