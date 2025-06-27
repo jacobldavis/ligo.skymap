@@ -17,6 +17,8 @@
 
 import math
 
+default_log_radial_integrator_size = 400
+
 def ang2vec(theta, phi):
     sz = math.sin(theta)
     return [sz * math.cos(phi), sz * math.sin(phi), math.cos(theta)]
@@ -31,6 +33,13 @@ def uniq2order64(uniq):
     order = uniq.bit_length() - 1
 
     return (order >> 1) - 1
+
+def uniq2pixarea64(uniq):
+    order = uniq2order64(uniq)
+    if (order < 0):
+        return math.nan
+    else:
+        return math.ldexp(math.pi / 3, -2 * order)
 
 def uniq2nest64(uniq):
     order = uniq2order64(uniq)
