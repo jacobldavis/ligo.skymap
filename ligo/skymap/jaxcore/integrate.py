@@ -214,10 +214,11 @@ class log_radial_integrator:
         self.region2 = cubic_interp(z2, size, umin, d)
     
     @staticmethod
-    def log_radial_integrator_eval(fx, x0, xlength, a, 
-                                   f1, t01, length1, a1, 
-                                   f2, t02, length2, a2,
-                                   p0_limit, vmax, ymax, p, b, log_p, log_b):
+    @jit
+    def log_radial_integrator_eval(region0, region1, region2, p0_limit, vmax, ymax, p, b, log_p, log_b):
+        fx, x0, xlength, a = region0
+        f1, t01, length1, a1 = region1
+        f2, t02, length2, a2 = region2 
         x = log_p 
         y = jnp.log(2) + 2 * log_p - log_b
         result = jnp.pow(0.5 * b / p, 2)
@@ -238,18 +239,18 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     end = time.perf_counter()
     print(f"JAX init time: {end - start}")
 
+    region0 = (integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a)
+    region1 = (integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a)
+    region2 = (integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a)
+
     result_jax_compile = integrator.log_radial_integrator_eval(
-        integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a,
-        integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a,
-        integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a,
+        region0, region1, region2,
         integrator.p0_limit, integrator.vmax, integrator.ymax,
         p, b, jnp.log(p), jnp.log(b)
     )
     start = time.perf_counter()
     result_jax = integrator.log_radial_integrator_eval(
-        integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a,
-        integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a,
-        integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a,
+        region0, region1, region2,
         integrator.p0_limit, integrator.vmax, integrator.ymax,
         p, b, jnp.log(p), jnp.log(b)
     )
@@ -261,10 +262,10 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
 # test_log_radial_integral(jnp.log(63), 0, 3, 6, 0, 0, 2)
 # test_log_radial_integral(-2.76076, 1e-3, 1e-6, 1, 1, 0, 2)
 # test_log_radial_integral(61.07118, 1e-3, 0, 1e9, 1, 0, 2)
-# test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
+test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
 # test_log_radial_integral(2.94548, 1e-4, 0, 4, 1, 1, 2)
 # test_log_radial_integral(2.94545, 1e-4, 0.5, 4, 1, 1, 2)
 # test_log_radial_integral(2.94085, 1e-4, 1, 4, 1, 1, 2)
-test_log_radial_integral(-2.43264, 1e-5, 0, 1, 1, 1, 2)
-test_log_radial_integral(-2.43808, 1e-5, 0.5, 1, 1, 1, 2)
-test_log_radial_integral(-0.707038, 1e-5, 1, 1.5, 1, 1, 2)
+# test_log_radial_integral(-2.43264, 1e-5, 0, 1, 1, 1, 2)
+# test_log_radial_integral(-2.43808, 1e-5, 0.5, 1, 1, 1, 2)
+# test_log_radial_integral(-0.707038, 1e-5, 1, 1.5, 1, 1, 2)

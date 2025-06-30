@@ -98,9 +98,8 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     ]))(jnp.arange(npix0))
 
     # Compute the coherent probability map and incoherent evidence at the lowest order
-    # TODO: Modify integration function later
-    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - log_radial_integrator_quadax.log_radial_integrator_eval_quadax(integrators[0].r1, integrators[0].r2, 0, 0, -jnp.inf, -jnp.inf)
-
+    regions = extract_integrator_regions(integrators)
+    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - integrators[0].log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax, 0, 0, -jnp.inf, -jnp.inf)
     accum = jnp.zeros(npix0, nifos)
 
     @jit

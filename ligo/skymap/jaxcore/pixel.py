@@ -33,6 +33,18 @@ M_PI_2 = jnp.pi / 2
 ntwopsi = 10
 nu = 10
 
+def extract_integrator_regions(integrators):
+    result = []
+    for i in range(3):
+        integrator = integrators[i]
+        row = [
+            (integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a),
+            (integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a),
+            (integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a),
+        ]
+        result.append(row)
+    return result
+
 def u_points_weights_init(nu):
     points, weights = np.polynomial.legendre.leggauss(nu)
 
@@ -144,8 +156,10 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     p, log_p, b, log_b = vmap(process_twopsi)(jnp.arange(ntwopsi))
     
     # Initialize accum with the integrator evaluation
-    # TODO: Modify integrator function later
-    accum = vmap(lambda iint: vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: u_points_weights[iu][1] + log_radial_integrator_quadax.log_radial_integrator_eval_quadax(integrators[iint].r1, integrators[iint].r2, p[itwopsi][iu], b[itwopsi][iu], integrators[iint].k))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))(jnp.arange(nint))
+    regions = extract_integrator_regions(integrators)
+    accum = vmap(lambda iint: vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                                                        u_points_weights[iu][1] + integrators[0].log_radial_integrator_eval(regions[iint][0], regions[iint][1], regions[iint][2], integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax, p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
+                                                        (jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))(jnp.arange(nint))
 
     # Compute the final value with max_accum and accum1
     # Flag 1: Change the value at pixels[i][1]
