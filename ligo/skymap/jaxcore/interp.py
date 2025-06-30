@@ -157,7 +157,7 @@ class bicubic_interp:
 
             return jnp.where(is_nan, x[0] + x[1], result)
 
-        return vmap(eval_point)(x)
+        return eval_point(x)
 
 # --- TEST SUITE ---
 
