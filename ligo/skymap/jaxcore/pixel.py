@@ -116,14 +116,13 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
     return vmap(process_u)(jnp.arange(u_points_weights.shape[0]))
 
 @jit
-def compute_accum(iint, nsamples, value, accum):
-    max_accum = -jnp.inf
-    max_accum = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: jnp.where(accum[iint][itwopsi][iu][isample] > max_accum, accum[iint][itwopsi][iu][isample], max_accum))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+def compute_accum(iint, nsamples, accum):
+    max_accum = jnp.max(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: accum[iint][itwopsi][iu][isample])(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
     accum1 = jnp.sum(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: jnp.exp(accum[iint][itwopsi][iu][isample] - max_accum))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
-    value[iint] = jnp.log(accum1) + max_accum
+    return jnp.log(accum1) + max_accum
 
 @jit
-def bsm_pixel_jax(integrators, nint, uniq, value, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     # Initialize starting values
     theta, phi = uniq2ang64(uniq) 
 
@@ -137,7 +136,7 @@ def bsm_pixel_jax(integrators, nint, uniq, value, gmst, nifos, nsamples, sample_
     # Shift SNR time series by the time delay for this sky position
     snrs_interp = vmap(lambda isample: vmap(lambda iifo: eval_snr(snrs[iifo], nsamples, isample - dt[iifo] * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(nifos)))(jnp.arange(nsamples))
 
-    # Perform the nasty section of code involving bayestar_singal_amplitude_model
+    # Perform bayestar_singal_amplitude_model
     def process_twopsi(itwopsi):
         p_u, log_p_u, b_u, log_b_u = compute_twopsi_slice(
             F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood)
@@ -149,7 +148,15 @@ def bsm_pixel_jax(integrators, nint, uniq, value, gmst, nifos, nsamples, sample_
     accum = vmap(lambda iint: vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: u_points_weights[iu][1] + log_radial_integrator_quadax.log_radial_integrator_eval_quadax(integrators[iint].r1, integrators[iint].r2, p[itwopsi][iu], b[itwopsi][iu], integrators[iint].k))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))(jnp.arange(nint))
 
     # Compute the final value with max_accum and accum1
-    vmap(lambda iint: compute_accum(iint, nsamples, value, accum))(jnp.arange(nint))
+    # Flag 1: Change the value at pixels[i][1][0]
+    # Flag 2: Change the value at accum[i][iifo]
+    # Flag 3: Change the values at pixels[i][1][1] and pixels[i][1][2]
+    # NOTE: JAX arrays are immutable, meaning you must reassign the whole array to change a value, 
+    # so this is my current solution for modifying the value array
+    pixels = jnp.where(flag == 1, pixels.at(i).at(1).at(0).set(compute_accum(0, nsamples, accum)), pixels)
+    pixels = jnp.where(flag == 2, pixels.at(i).at(iifo).set(compute_accum(0, nsamples, accum)), pixels)
+    pixels = jnp.where(flag == 3, pixels.at(i).at(1).at(1).set(compute_accum(0, nsamples, accum)), pixels)
+    pixels = jnp.where(flag == 3, pixels.at(i).at(1).at(2).set(compute_accum(1, nsamples, accum)), pixels)
 
 # --- TESTS ---
 def test_eval_snr():
