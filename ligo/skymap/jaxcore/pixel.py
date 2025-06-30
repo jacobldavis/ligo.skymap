@@ -148,15 +148,16 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     accum = vmap(lambda iint: vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: u_points_weights[iu][1] + log_radial_integrator_quadax.log_radial_integrator_eval_quadax(integrators[iint].r1, integrators[iint].r2, p[itwopsi][iu], b[itwopsi][iu], integrators[iint].k))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))(jnp.arange(nint))
 
     # Compute the final value with max_accum and accum1
-    # Flag 1: Change the value at pixels[i][1][0]
+    # Flag 1: Change the value at pixels[i][1]
     # Flag 2: Change the value at accum[i][iifo]
-    # Flag 3: Change the values at pixels[i][1][1] and pixels[i][1][2]
+    # Flag 3: Change the values at pixels[i][1] and pixels[i][2]
     # NOTE: JAX arrays are immutable, meaning you must reassign the whole array to change a value, 
     # so this is my current solution for modifying the value array
-    pixels = jnp.where(flag == 1, pixels.at(i).at(1).at(0).set(compute_accum(0, nsamples, accum)), pixels)
+    pixels = jnp.where(flag == 1, pixels.at(i).at(1).set(compute_accum(0, nsamples, accum)), pixels)
     pixels = jnp.where(flag == 2, pixels.at(i).at(iifo).set(compute_accum(0, nsamples, accum)), pixels)
-    pixels = jnp.where(flag == 3, pixels.at(i).at(1).at(1).set(compute_accum(0, nsamples, accum)), pixels)
-    pixels = jnp.where(flag == 3, pixels.at(i).at(1).at(2).set(compute_accum(1, nsamples, accum)), pixels)
+    pixels = jnp.where(flag == 3, pixels.at(i).at(2).set(compute_accum(0, nsamples, accum)), pixels)
+    pixels = jnp.where(flag == 3, pixels.at(i).at(3).set(compute_accum(1, nsamples, accum)), pixels)
+    return pixels
 
 # --- TESTS ---
 def test_eval_snr():

@@ -294,7 +294,7 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
 
 # test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
 # test_log_radial_integral(jnp.log(63), 0, 3, 6, 0, 0, 2)
-# test_log_radial_integral(-2.76076, 1e-3, 1e-6, 1, 1, 0, 2)
+test_log_radial_integral(-2.76076, 1e-3, 1e-6, 1, 1, 0, 2)
 # test_log_radial_integral(61.07118, 1e-3, 0, 1e9, 1, 0, 2)
 # test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
 # test_log_radial_integral(2.94085, 1e-4, 1, 4, 1, 1, 2)
