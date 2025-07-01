@@ -19,11 +19,11 @@ import numpy as np
 from jax import jit, vmap, lax
 import jax
 import jax.numpy as jnp
-from cosmology import *
-from moc import *
-from interp import *
-from integrate import *
-from pixel import *
+from .jax_cosmology import *
+from .jax_moc import *
+from .jax_interp import *
+from .jax_integrate import *
+from .jax_pixel import *
 M_LN2 = jnp.log(2)
 
 @jit
@@ -81,7 +81,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
             cosmology, gmst, nifos, nsamples, sample_rate, epochs, snrs, 
             responses, locations, horizons, rescale_loglikelihood):
     # Initialize integrators
-    pmax = jnp.sum(vmap(lambda iifo: jnp.pow(horizons[iifo], 2))(jnp.arange(nifos)))
+    pmax = jnp.sum(vmap(lambda h: jnp.square(h))(horizons))
     pmax = jnp.sqrt(0.5 * pmax)
     pmax *= rescale_loglikelihood
     integrators = [log_radial_integrator(min_distance, max_distance, prior_distance_power + 0, cosmology, pmax, default_log_radial_integrator_size),

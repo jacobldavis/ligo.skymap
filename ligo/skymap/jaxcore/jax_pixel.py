@@ -19,14 +19,11 @@ import numpy as np
 from jax import jit, vmap, lax
 import jax
 import jax.numpy as jnp
-import time
-import timeit
 from functools import partial
-from interp import *
-from integrate import *
-from cosmology import *
-from moc import *
-from quadax import quadgk # type: ignore
+from ligo.skymap.jaxcore.jax_interp import *
+from ligo.skymap.jaxcore.jax_integrate import *
+from ligo.skymap.jaxcore.jax_cosmology import *
+from ligo.skymap.jaxcore.jax_moc import *
 
 # Constants
 M_PI_2 = jnp.pi / 2

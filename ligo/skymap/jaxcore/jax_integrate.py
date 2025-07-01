@@ -25,8 +25,8 @@ import jax.numpy as jnp
 import time
 import timeit
 from functools import partial
-from interp import *
-from cosmology import *
+from ligo.skymap.jaxcore.jax_interp import *
+from ligo.skymap.jaxcore.jax_cosmology import *
 from quadax import quadgk # type: ignore
 
 SQRT_2 = jnp.sqrt(2)
@@ -189,9 +189,9 @@ class log_radial_integrator:
     def __init__(self, r1, r2, k, cosmology, pmax, size):
         # Initialize constant values
         alpha = 4
-        p0 = 0.5 * r2 if k >= 0 else 0.5 * r1
+        p0 = jnp.where(k >= 0, 0.5 * r2, 0.5 * r1)
         xmax = jnp.log(pmax)
-        x0 = min(jnp.log(p0), xmax)
+        x0 = jnp.where(jnp.log(p0) > xmax, jnp.log(p0), xmax)
         xmin = x0 - (1 + SQRT_2) * alpha
         self.ymax = x0 + alpha
         ymin = 2 * x0 - SQRT_2 * alpha - xmax
@@ -199,7 +199,9 @@ class log_radial_integrator:
         umin = - (1 + 1/SQRT_2) * alpha
         self.vmax = x0 - (1/SQRT_2) * alpha
         k1 = k + 1
-        self.p0_limit = jnp.log(jnp.log(r2/r1)) if k == -1 else jnp.log((jnp.power(r2,k1)-jnp.power(r1,k1))/(k1))
+        r2 = jnp.where(1e-12 > r2, 1e-12, r2)
+        r1 = jnp.where(1e-12 > r1, 1e-12, r1)
+        self.p0_limit = jnp.where(k == -1, jnp.log(jnp.log(r2/r1)), jnp.log((jnp.power(r2,k1)-jnp.power(r1,k1))/(k1)))
 
         # Create data arrays for initializing interps
         z0 = vmap(lambda ix: vmap(lambda iy: log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology))(jnp.arange(size)))(jnp.arange(size))

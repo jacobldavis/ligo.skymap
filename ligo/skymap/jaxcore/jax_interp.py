@@ -27,7 +27,7 @@ class cubic_interp:
         self.f = jnp.float32(1 / dt)
         self.t0 = 3 - jnp.float32(self.f * tmin)
         self.length = jnp.int32(n + 6)
-        idx = jnp.arange(self.length)
+        idx = np.arange(n + 6).astype(np.int32)
         self.a = self.compute_coeffs(data, n, idx)
 
     @staticmethod

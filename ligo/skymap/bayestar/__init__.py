@@ -53,6 +53,8 @@ from ..util.numpy import require_contiguous_aligned
 from ..util.stopwatch import Stopwatch
 from .ez_emcee import ez_emcee
 
+from ..jaxcore.jax_local import bsm_jax
+
 __all__ = ('derasterize', 'localize', 'rasterize', 'antenna_factor',
            'signal_amplitude_model')
 
@@ -392,7 +394,10 @@ def localize(
             xmax=[2 * np.pi, 1, max_distance, 1, 2 * np.pi, 2 * max_abs_t],
             chain_dump=chain_dump)
     else:
-        skymap, log_bci, log_bsn = core.toa_phoa_snr(*args)
+        # skymap, log_bci, log_bsn = core.toa_phoa_snr(*args)
+        skymap, log_bci, log_bsn = bsm_jax(min_distance, max_distance, prior_distance_power,
+                                           cosmology, gmst, len(toas), snrs[0].shape[0], sample_rate,
+                                           toas, snrs, responses, locations, horizons, rescale_loglikelihood)
         skymap = Table(skymap, copy=False)
         skymap.meta['log_bci'] = log_bci
         skymap.meta['log_bsn'] = log_bsn
