@@ -108,8 +108,7 @@ def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
 
 @jit
 def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
-    x = p / r - 0.5 * b / p
-    ret = scale - x**2
+    ret = scale - jnp.pow(p / r - 0.5 * b / p, 2)
 
     multiplier = i0e(b / r) * jnp.power(r, k)
     return jnp.where(cosmology, jnp.exp(ret + log_dVC_dVL(r, x_knots, coeffs)) * multiplier, jnp.exp(ret) * multiplier)
@@ -182,7 +181,7 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
         return radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, -log_offset)
 
     # Adaptive quadrature
-    result, _ = quadgk(integrand, [r1,r2], epsabs=1e-8)
+    result, _ = quadgk(integrand, [r1,r2], epsrel=1e-8)
 
     return jnp.log(result) + log_offset
 
@@ -232,7 +231,6 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     p = math.sqrt(p2)
 
     print(f"EXPECTED: {expected} +/- {tol}")
-    print("==> JAX VERSION:")
     integratora = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
     start = time.perf_counter()
     integrator = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
@@ -258,11 +256,15 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     print(f"JAX result: {result_jax}")
     print(f"JAX time: {end-start}\n")
 
-# test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
+# test_log_radial_integral(0, 0, 0, 1, 0, 0, 0)
+# test_log_radial_integral(0, 0, jnp.exp(1), jnp.exp(2), 0, 0, -1)
 # test_log_radial_integral(jnp.log(63), 0, 3, 6, 0, 0, 2)
-# test_log_radial_integral(-2.76076, 1e-3, 1e-6, 1, 1, 0, 2)
+# test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
+# test_log_radial_integral(0.432919, 1e-3, 1, 2, 1, 0, 2)
+# test_log_radial_integral(-2.76076, 1e-3, 0, 1, 1, 0, 2)
 # test_log_radial_integral(61.07118, 1e-3, 0, 1e9, 1, 0, 2)
-test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
+# test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
+# test_log_radial_integral(-jnp.inf, 1e-3, 0, 1e-3, 1, 0, 2)
 # test_log_radial_integral(2.94548, 1e-4, 0, 4, 1, 1, 2)
 # test_log_radial_integral(2.94545, 1e-4, 0.5, 4, 1, 1, 2)
 # test_log_radial_integral(2.94085, 1e-4, 1, 4, 1, 1, 2)
