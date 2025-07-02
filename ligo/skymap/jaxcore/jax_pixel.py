@@ -25,12 +25,6 @@ from ligo.skymap.jaxcore.jax_integrate import *
 from ligo.skymap.jaxcore.jax_cosmology import *
 from ligo.skymap.jaxcore.jax_moc import *
 
-# Constants
-M_PI_2 = jnp.pi / 2
-M_LN2 = jnp.log(2)
-ntwopsi = 10
-nu = 10
-
 def extract_integrator_regions(integrators):
     result = []
     for integrator in integrators:
@@ -71,6 +65,16 @@ def antenna_factor(D, ra, dec, gmst):
         return (X[i] * DX - Y[i] * DY) + (X[i] * DY + Y[i] * DX) * 1j
     F = jnp.sum(vmap(dxdy)(jnp.arange(3)))
     return F
+
+def compute_F(responses, horizons, phi, theta, gmst):
+    nifos = responses.shape[0]
+    F_init = jnp.zeros(nifos, dtype=jnp.complex64)
+
+    def body(i, F):
+        val = antenna_factor(responses[i], phi, M_PI_2 - theta, gmst) * horizons[i]
+        return F.at[i].set(val)
+
+    return lax.fori_loop(0, nifos, body, F_init)
 
 @jit
 def catrom(x0, x1, x2, x3, t):
@@ -130,7 +134,8 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
     return vmap(process_u)(jnp.arange(u_points_weights.shape[0]))
 
 @jit
-def compute_accum(iint, nsamples, accum):
+def compute_accum(iint, snrs, accum):
+    nsamples = snrs.shape[1]
     max_accum = jnp.max(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: accum[iint][itwopsi][iu][isample])(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
     accum1 = jnp.sum(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: jnp.exp(accum[iint][itwopsi][iu][isample] - max_accum))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
     return jnp.log(accum1) + max_accum
@@ -141,7 +146,7 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     theta, phi = uniq2ang64(uniq)
 
     # Look up antenna factors
-    F = vmap(lambda resp, h: antenna_factor(resp, phi, M_PI_2 - theta, gmst) * h)(responses, horizons)
+    F = compute_F(responses, horizons, phi, theta, gmst)
 
     # Compute dt
     dt = toa_errors(theta, phi, gmst, nifos, locations, epochs)
@@ -161,13 +166,13 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     
     # Initialize accum with the integrator evaluation
     accum0 = jnp.where(nint > 0, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][0][0], integrators[0][0][1], integrators[0][0][2], integrators[1][0], p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
+                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][0][0], integrators[0][0][1], integrators[0][0][2], integrators[1][0], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
                                  (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
     accum1 = jnp.where(nint > 1, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][1][0], integrators[0][1][1], integrators[0][1][2], integrators[1][1], p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
+                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][1][0], integrators[0][1][1], integrators[0][1][2], integrators[1][1], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
                                  (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
     accum2 = jnp.where(nint > 2, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][2][0], integrators[0][2][1], integrators[0][2][2], integrators[1][2], p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
+                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][2][0], integrators[0][2][1], integrators[0][2][2], integrators[1][2], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
                                  (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
     accum = jnp.array([accum0, accum1, accum2])
 
@@ -177,10 +182,30 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     # Flag 3: Change the values at pixels[i][1] and pixels[i][2]
     # NOTE: JAX arrays are immutable, meaning you must reassign the whole array to change a value, 
     # so this is my current solution for modifying the value array
-    pixels = jnp.where(flag == 1, pixels.at(i).at(1).set(compute_accum(0, nsamples, accum)), pixels)
-    pixels = jnp.where(flag == 2, pixels.at(i).at(iifo).set(compute_accum(0, nsamples, accum)), pixels)
-    pixels = jnp.where(flag == 3, pixels.at(i).at(2).set(compute_accum(0, nsamples, accum)), pixels)
-    pixels = jnp.where(flag == 3, pixels.at(i).at(3).set(compute_accum(1, nsamples, accum)), pixels)
+    pixels = lax.cond(
+        flag == 1,
+        lambda px: px.at[i, 1].set(compute_accum(0, snrs, accum)),
+        lambda px: px,
+        pixels
+    )
+    pixels = lax.cond(
+        flag == 2,
+        lambda px: px.at[i, iifo].set(compute_accum(0, snrs, accum)),
+        lambda px: px,
+        pixels
+    )
+    pixels = lax.cond(
+        flag == 3,
+        lambda px: px.at[i, 2].set(compute_accum(0, snrs, accum)),
+        lambda px: px,
+        pixels
+    )
+    pixels = lax.cond(
+        flag == 3,
+        lambda px: px.at[i, 3].set(compute_accum(1, snrs, accum)),
+        lambda px: px,
+        pixels
+    )
     return pixels
 
 # --- TESTS ---

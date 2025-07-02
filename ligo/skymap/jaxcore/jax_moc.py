@@ -21,6 +21,10 @@ import jax.numpy as jnp
 import numpy as np
 
 default_log_radial_integrator_size = 400
+M_PI_2 = jnp.pi / 2
+M_LN2 = jnp.log(2)
+ntwopsi = 10
+nu = 10
 
 def ang2vec(theta, phi):
     sz = jnp.sin(theta)

@@ -75,7 +75,7 @@ def bayestar_pixels_sort_uniq(pixels, len):
     sorted_indices = jnp.argsort(uniq)
     return pixels[sorted_indices]
 
-@jit
+@partial(jit, static_argnames=['nifos'])
 def bsm_jax(min_distance, max_distance, prior_distance_power, 
             cosmology, gmst, nifos, nsamples, sample_rate, epochs, snrs, 
             responses, locations, horizons, rescale_loglikelihood):
@@ -101,15 +101,19 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Compute the coherent probability map and incoherent evidence at the lowest order
     log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - log_radial_integrator.log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], (integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax), 0, 0, -jnp.inf, -jnp.inf)
-    accum = jnp.zeros(npix0, nifos)
+    accum = jnp.zeros((npix0, nifos))
 
     @jit
     def accum_map(i, iifo, pixels, accum):
         return bsm_pixel_jax(
             integrators_values, 1, 2, i, iifo, pixels[i, 0], accum,
             gmst, 1, nsamples, sample_rate,
-            epochs[iifo], snrs[iifo], responses[iifo],
-            locations[iifo], horizons[iifo], rescale_loglikelihood
+            lax.dynamic_slice(epochs, (iifo,), (2,)), 
+            lax.dynamic_slice(snrs, (iifo, 0, 0), (2, snrs.shape[1], snrs.shape[2])), 
+            lax.dynamic_slice(responses, (iifo, 0, 0), (2, responses.shape[1], responses.shape[2])),
+            lax.dynamic_slice(locations, (iifo, 0), (2, locations.shape[1])), 
+            lax.dynamic_slice(horizons, (iifo,), (2,)),
+            rescale_loglikelihood
         )
     
     @jit

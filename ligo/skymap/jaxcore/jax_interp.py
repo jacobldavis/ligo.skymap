@@ -21,6 +21,7 @@ import jax
 import jax.numpy as jnp
 import time
 from functools import partial
+ARANGE4 = jnp.arange(4)
 
 class cubic_interp:
     def __init__(self, data, n, tmin, dt):
@@ -74,8 +75,6 @@ class cubic_interp:
         a3 = a[ix, 3]
 
         return ((a0 * x + a1) * x + a2) * x + a3
-
-ARANGE4 = jnp.arange(4)
 
 @jit
 def cubic_eval(coeffs, x):
