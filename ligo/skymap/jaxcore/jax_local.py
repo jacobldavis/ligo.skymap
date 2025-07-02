@@ -24,7 +24,6 @@ from .jax_moc import *
 from .jax_interp import *
 from .jax_integrate import *
 from .jax_pixel import *
-M_LN2 = jnp.log(2)
 
 @jit
 def logsumexp(accum, log_weight, ni, nj):
@@ -87,6 +86,9 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     integrators = [log_radial_integrator(min_distance, max_distance, prior_distance_power + 0, cosmology, pmax, default_log_radial_integrator_size),
                    log_radial_integrator(min_distance, max_distance, prior_distance_power + 1, cosmology, pmax, default_log_radial_integrator_size),
                    log_radial_integrator(min_distance, max_distance, prior_distance_power + 2, cosmology, pmax, default_log_radial_integrator_size)]
+    regions = extract_integrator_regions(integrators)
+    limits = extract_integrator_limits(integrators)
+    integrators_values = (regions, limits)
     
     # Initialize pixels
     order0 = 4
@@ -98,14 +100,13 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     ]))(jnp.arange(npix0))
 
     # Compute the coherent probability map and incoherent evidence at the lowest order
-    regions = extract_integrator_regions(integrators)
-    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - integrators[0].log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax, 0, 0, -jnp.inf, -jnp.inf)
+    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - log_radial_integrator.log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], (integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax), 0, 0, -jnp.inf, -jnp.inf)
     accum = jnp.zeros(npix0, nifos)
 
     @jit
     def accum_map(i, iifo, pixels, accum):
         return bsm_pixel_jax(
-            integrators, 1, 2, i, iifo, pixels[i, 0], accum,
+            integrators_values, 1, 2, i, iifo, pixels[i, 0], accum,
             gmst, 1, nsamples, sample_rate,
             epochs[iifo], snrs[iifo], responses[iifo],
             locations[iifo], horizons[iifo], rescale_loglikelihood
@@ -114,7 +115,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     @jit
     def probability_map(i, pixels, accum):
         pixels_out = bsm_pixel_jax(
-            integrators, 1, 1, i, 0, pixels[i, 0], pixels,
+            integrators_values, 1, 1, i, 0, pixels[i, 0], pixels,
             gmst, nifos, nsamples, sample_rate,
             epochs, snrs, responses, locations, horizons, rescale_loglikelihood
         )
@@ -150,7 +151,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         pixels = jax.lax.fori_loop(
         len - npix0, len,
         lambda i, pixels: bsm_pixel_jax(
-            integrators, 1, 1, i, 0, pixels[i, 0], pixels,
+            integrators_values, 1, 1, i, 0, pixels[i, 0], pixels,
             gmst, nifos, nsamples, sample_rate,
             epochs, snrs, responses, locations, horizons, rescale_loglikelihood),pixels
         )
@@ -164,10 +165,12 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Evaluate distance layers
     pixels = jax.lax.fori_loop(0, len, lambda i, 
-            pixels: bsm_pixel_jax(integrators, 1, 2, i, 0, pixels[i, 0], pixels,
+            pixels: bsm_pixel_jax(integrators_values, 2, 3, i, 0, pixels[i, 0], pixels,
             gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, 
             locations, horizons, rescale_loglikelihood), pixels
     )
+
+    # --- DONE SECTION ---
 
     # Rescale so that log(max) = 0
     max_logp = pixels[len-1, 1]

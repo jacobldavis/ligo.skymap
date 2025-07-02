@@ -27,26 +27,31 @@ from ligo.skymap.jaxcore.jax_moc import *
 
 # Constants
 M_PI_2 = jnp.pi / 2
+M_LN2 = jnp.log(2)
 ntwopsi = 10
 nu = 10
 
 def extract_integrator_regions(integrators):
     result = []
-    for i in range(3):
-        integrator = integrators[i]
-        row = [
+    for integrator in integrators:
+        result.append((
             (integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a),
             (integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a),
             (integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a),
-        ]
-        result.append(row)
+        ))
+    return result 
+
+def extract_integrator_limits(integrators):
+    result = []
+    for integrator in integrators:
+        result.append((integrator.p0_limit, integrator.vmax, integrator.ymax))
     return result
 
 def u_points_weights_init(nu):
     points, weights = np.polynomial.legendre.leggauss(nu)
 
     u_points_weights = np.column_stack((points, np.log(weights)))
-    return u_points_weights
+    return jnp.array(u_points_weights)
 
 u_points_weights = u_points_weights_init(nu)
 
@@ -57,8 +62,8 @@ def antenna_factor(D, ra, dec, gmst):
     singha = jnp.sin(gha)
     cosdec = jnp.cos(dec)
     sindec = jnp.sin(dec)
-    X = (-singha, -cosgha, 0)
-    Y = (-cosgha * sindec, singha * sindec, cosdec)
+    X = jnp.array([-singha, -cosgha, 0.0])
+    Y = jnp.array([-cosgha * sindec, singha * sindec, cosdec])
     F = 0
     def dxdy(i):
         DX = D[i][0] * X[0] + D[i][1] * X[1] + D[i][2] * X[2]
@@ -133,17 +138,19 @@ def compute_accum(iint, nsamples, accum):
 @jit
 def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     # Initialize starting values
-    theta, phi = uniq2ang64(uniq) 
+    theta, phi = uniq2ang64(uniq)
 
     # Look up antenna factors
-    def antenna_lookup(i): antenna_factor(responses[i], phi, M_PI_2-theta, gmst) * horizons[i] 
-    F = vmap(antenna_lookup)(jnp.arange(nifos))
+    F = vmap(lambda resp, h: antenna_factor(resp, phi, M_PI_2 - theta, gmst) * h)(responses, horizons)
 
     # Compute dt
     dt = toa_errors(theta, phi, gmst, nifos, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(lambda isample: vmap(lambda iifo: eval_snr(snrs[iifo], nsamples, isample - dt[iifo] * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(nifos)))(jnp.arange(nsamples))
+    def snr_row(isample):
+        t = isample - dt * sample_rate - 0.5 * (nsamples - 1) 
+        return vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, t)  
+    snrs_interp = vmap(snr_row)(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_singal_amplitude_model
     def process_twopsi(itwopsi):
@@ -153,10 +160,16 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     p, log_p, b, log_b = vmap(process_twopsi)(jnp.arange(ntwopsi))
     
     # Initialize accum with the integrator evaluation
-    regions = extract_integrator_regions(integrators)
-    accum = vmap(lambda iint: vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                                                        u_points_weights[iu][1] + integrators[0].log_radial_integrator_eval(regions[iint][0], regions[iint][1], regions[iint][2], integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax, p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
-                                                        (jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))(jnp.arange(nint))
+    accum0 = jnp.where(nint > 0, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][0][0], integrators[0][0][1], integrators[0][0][2], integrators[1][0], p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
+                                 (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
+    accum1 = jnp.where(nint > 1, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][1][0], integrators[0][1][1], integrators[0][1][2], integrators[1][1], p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
+                                 (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
+    accum2 = jnp.where(nint > 2, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][2][0], integrators[0][2][1], integrators[0][2][2], integrators[1][2], p[itwopsi][iu], b[itwopsi][iu], jnp.log(p[itwopsi][iu]), jnp.log(b[itwopsi][iu])))
+                                 (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
+    accum = jnp.array([accum0, accum1, accum2])
 
     # Compute the final value with max_accum and accum1
     # Flag 1: Change the value at pixels[i][1]
