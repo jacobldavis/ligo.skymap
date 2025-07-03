@@ -39,10 +39,7 @@ def uniq2order64(uniq):
 
 def uniq2pixarea64(uniq):
     order = uniq2order64(uniq)
-    if (order < 0):
-        return math.nan
-    else:
-        return math.ldexp(math.pi / 3, -2 * order)
+    return jnp.where(order < 0, jnp.nan, jnp.ldexp(jnp.pi / 3, -2 * order))
 
 def uniq2nest64(uniq):
     order = uniq2order64(uniq)

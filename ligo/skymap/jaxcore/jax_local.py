@@ -26,10 +26,11 @@ from .jax_integrate import *
 from .jax_pixel import *
 
 @jit
-def logsumexp(accum, log_weight, ni, nj):
-    max_accum = vmap(lambda i: jnp.max(accum[i]))(jnp.arange(ni))
-    sum_accum = vmap(lambda i: jnp.sum(jnp.exp(accum[i] - max_accum)))(jnp.arange(ni))
-    result = vmap(lambda j: jnp.log(sum_accum[j]) + max_accum[j] + log_weight)(jnp.arange(nj))
+def logsumexp(accum, log_weight):
+    max_accum = jnp.max(accum, axis=0) 
+    shifted = accum - max_accum 
+    sum_accum = jnp.sum(jnp.exp(shifted), axis=0)
+    result = jnp.log(sum_accum) + max_accum + log_weight
     return result
 
 @jit
@@ -52,9 +53,9 @@ def bayestar_pixels_refine(pixels, last_n):
 
     keep = pixels[:len0 - last_n]
 
-    return jnp.concatenate([keep, refined], axis=0), len
+    return jnp.concatenate([keep, refined], axis=0), new_len
 
-@jit
+@partial(jit, static_argnames=['npix0'])
 def bayestar_pixels_sort_prob(pixels, npix0):
     def compute_score(i):
         uniq = pixels[i, 0].astype(jnp.int64)
@@ -142,30 +143,38 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     pixels, accum = run_all(pixels, accum)
     
     log_weight = log_norm + jnp.log(uniq2pixarea64(pixels[0, 0]))
-    log_evidence_incoherent = logsumexp(accum, log_weight, npix0, nifos)
+    log_evidence_incoherent = logsumexp(accum, log_weight)
 
     # Sort pixels by ascending posterior probability
     pixels = bayestar_pixels_sort_prob(pixels, npix0)
 
     # Adaptively refine until order=11
     @jit
-    def refine(pixels, len):
-        pixels, len = bayestar_pixels_refine(pixels, len, npix0 / 4)
+    def refine(i, carry):
+        pixels, length = carry
 
-        pixels = jax.lax.fori_loop(
-        len - npix0, len,
-        lambda i, pixels: bsm_pixel_jax(
-            integrators_values, 1, 1, i, 0, pixels[i, 0], pixels,
-            gmst, nifos, nsamples, sample_rate,
-            epochs, snrs, responses, locations, horizons, rescale_loglikelihood),pixels
+        # Redefine pixels length
+        refine_len = length // 4
+        pixels, length = bayestar_pixels_refine(pixels, refine_len)
+
+        # Add new pixels 
+        pixels = lax.fori_loop(
+            length - npix0, length,
+            lambda j, px: bsm_pixel_jax(
+                integrators_values, 1, 1, j, 0, px[j, 0], px,
+                gmst, nifos, nsamples, sample_rate,
+                epochs, snrs, responses, locations, horizons, rescale_loglikelihood
+            ),
+            pixels
         )
 
-        pixels = bayestar_pixels_sort_prob(pixels, len)
+        # Sort
+        pixels = bayestar_pixels_sort_prob(pixels, length)
 
-        return pixels, len
+        return (pixels, length)
     
-    len = 0
-    pixels, len = jax.lax.fori_loop(order0, 11, refine, (pixels, len))
+    initial_length = 0
+    pixels, len = lax.fori_loop(order0, 11, refine, (pixels, initial_length))
 
     # Evaluate distance layers
     pixels = jax.lax.fori_loop(0, len, lambda i, 
