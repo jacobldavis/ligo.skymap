@@ -179,7 +179,7 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     # Compute the final value with max_accum and accum1
     # Flag 1: Change the value at pixels[i][1]
     # Flag 2: Change the value at accum[i][iifo]
-    # Flag 3: Change the values at pixels[i][1] and pixels[i][2]
+    # Flag 3: Change the values at pixels[i][2] and pixels[i][3]
     # NOTE: JAX arrays are immutable, meaning you must reassign the whole array to change a value, 
     # so this is my current solution for modifying the value array
     pixels = lax.cond(
