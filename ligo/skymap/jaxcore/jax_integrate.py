@@ -131,7 +131,7 @@ def compute_breakpoints(p, b, r1, r2):
     def try_add(bp, x, n):
         cond = jnp.logical_and(x > bp[n-1], x < r2)
         bp = lax.cond(cond, lambda b: b.at[n].set(x), lambda b: b, bp)
-        n = n + cond.astype(jnp.int32)
+        n = n + cond
         return bp, n
 
     # Only do this branch if b != 0
