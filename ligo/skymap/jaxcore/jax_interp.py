@@ -14,7 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-
+import os
+os.environ["JAX_ENABLE_X64"] = "true"
 import numpy as np
 from jax import jit, vmap
 import jax
