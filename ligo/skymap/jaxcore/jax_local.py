@@ -34,45 +34,55 @@ def logsumexp(accum, log_weight):
     return result
 
 @jit
+def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
+    length = pixels.shape[0]
+    new_length = new_pixels.shape[0]
+
+    new_pixels = lax.dynamic_update_slice(new_pixels, pixels, (0, 0))
+
+    def refine_loop(i, new_pixels):
+        parent_idx = length - i - 1
+        parent_pixel = pixels[parent_idx]
+        parent_uniq = parent_pixel[0]
+        aux_data = parent_pixel[1:4]
+
+        base_uniq = 4 * parent_uniq
+        child_uniqs = jnp.arange(4, dtype=pixels.dtype) + base_uniq
+        child_aux = jnp.tile(aux_data[None, :], (4, 1))
+        new_children = jnp.concatenate([child_uniqs[:, None], child_aux], axis=1)
+
+        dest_idx = new_length - 4 * i - 4
+        new_pixels = lax.dynamic_update_slice(new_pixels, new_children, (dest_idx, 0))
+        return new_pixels
+
+    new_pixels = lax.fori_loop(0, last_n, refine_loop, new_pixels)
+    return new_pixels, new_length
+
 def bayestar_pixels_refine(pixels, last_n):
-    len0 = pixels.shape[0]
-    new_len = len0 + 3 * last_n
+    length = pixels.shape[0]
+    new_length = length + 3 * last_n
+    new_pixels = jnp.zeros((new_length, 4), dtype=pixels.dtype) 
+    return bayestar_pixels_refine_core(pixels, last_n, new_pixels)
 
-    to_refine = pixels[-last_n:] 
-    base_uniq = to_refine[:, 0].astype(jnp.int64) * 4 
-
-    def refine_one(i):
-        value = to_refine[i, 1:4]
-        uniq_base = base_uniq[i]
-        uniqs = uniq_base + jnp.arange(4) 
-        values = jnp.tile(value[None, :], (4, 1)) 
-        return jnp.concatenate([uniqs[:, None], values], axis=1) 
-
-    refined = jax.vmap(refine_one)(jnp.arange(last_n))
-    refined = refined.reshape(-1, 4)
-
-    keep = pixels[:len0 - last_n]
-
-    return jnp.concatenate([keep, refined], axis=0), new_len
-
-@partial(jit, static_argnames=['npix0'])
-def bayestar_pixels_sort_prob(pixels, npix0):
-    def compute_score(i):
-        uniq = pixels[i, 0].astype(jnp.int64)
-        value0 = pixels[i, 1]
+@jit
+def bayestar_pixels_sort_prob(pixels):
+    def compute_score(pixel):
+        uniq = pixel[0].astype(jnp.uint64)
+        logp = pixel[1]
         order = uniq2order64(uniq)
-        score = value0 - 2 * M_LN2 * order
-        return score
+        return logp - 2 * M_LN2 * order
 
-    scores = vmap(compute_score)(jnp.arange(npix0)) 
-    sorted_indices = jnp.argsort(scores)
-    return pixels[sorted_indices]
+    length = pixels.shape[0] 
+    scores = vmap(compute_score)(pixels)
+    sorted_indices = jnp.argsort(-scores)
+    sorted_pixels = pixels[sorted_indices]
+    return sorted_pixels
 
 @jit 
-def bayestar_pixels_sort_uniq(pixels, len):
+def bayestar_pixels_sort_uniq(pixels):
     def get_uniq(i):
         return pixels[i,0]
-    uniq = vmap(get_uniq)(jnp.arange(len))
+    uniq = vmap(get_uniq)(jnp.arange(pixels.shape[0]))
     sorted_indices = jnp.argsort(uniq)
     return pixels[sorted_indices]
 
@@ -146,16 +156,13 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     log_evidence_incoherent = logsumexp(accum, log_weight)
 
     # Sort pixels by ascending posterior probability
-    pixels = bayestar_pixels_sort_prob(pixels, npix0)
+    pixels = bayestar_pixels_sort_prob(pixels)
 
     # Adaptively refine until order=11
     @jit
-    def refine(i, carry):
-        pixels, length = carry
-
+    def refine(pixels):
         # Redefine pixels length
-        refine_len = length // 4
-        pixels, length = bayestar_pixels_refine(pixels, refine_len)
+        pixels, length = bayestar_pixels_refine(pixels, int(npix0) // 4)
 
         # Add new pixels 
         pixels = lax.fori_loop(
@@ -169,12 +176,17 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         )
 
         # Sort
-        pixels = bayestar_pixels_sort_prob(pixels, length)
+        pixels = bayestar_pixels_sort_prob(pixels)
 
         return (pixels, length)
     
-    initial_length = 0
-    pixels, len = lax.fori_loop(order0, 11, refine, (pixels, initial_length))
+    pixels, len = refine(pixels)
+    pixels, len = refine(pixels)
+    pixels, len = refine(pixels)
+    pixels, len = refine(pixels)
+    pixels, len = refine(pixels)
+    pixels, len = refine(pixels)
+    pixels, len = refine(pixels)
 
     # Evaluate distance layers
     pixels = jax.lax.fori_loop(0, len, lambda i, 
@@ -190,9 +202,9 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     @jit
     def log_rescale(i, pixels):
-        pixels = pixels.at(i).at(1).set(pixels[i, 1] - max_logp)
-        pixels = pixels.at(i).at(2).set(pixels[i, 2] - max_logp)
-        pixels = pixels.at(i, 3).set(pixels[i, 3] - max_logp)
+        pixels = pixels.at[i, 1].set(pixels[i, 1] - max_logp)
+        pixels = pixels.at[i, 2].set(pixels[i, 2] - max_logp)
+        pixels = pixels.at[i, 3].set(pixels[i, 3] - max_logp)
         return pixels
 
     pixels = jax.lax.fori_loop(0, len, log_rescale, pixels)
@@ -203,7 +215,8 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         dA = uniq2pixarea64(pixels[i, 0])
         dP = jnp.exp(pixels[i, 1]) * dA 
         return dP
-    norm = jnp.sum(vmap(jnp.where(calc_dp>0,calc_dp,0))(jnp.arange(len)))
+    dps = vmap(lambda i: calc_dp(i, pixels))(jnp.arange(pixels.shape[0]))
+    norm = jnp.sum(jnp.where(dps>0,dps,0))
     log_evidence_coherent = jnp.log(norm) + max_logp + log_norm 
     norm = 1 / norm
 
@@ -215,15 +228,15 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         rstd = jnp.exp(pixels[i, 3] - pixels[i, 1]) - (rmean * rmean)
         rmean = jnp.where(rstd >= 0, jnp.inf, rmean)
         rstd = jnp.where(rstd >= 0, jnp.sqrt(rstd), 1)
-        pixels.at(i).at(1).set(prob)
-        pixels.at(i).at(2).set(rmean)
-        pixels.at(i).at(3).set(rstd)
+        pixels.at[i, 1].set(prob)
+        pixels.at[i, 2].set(rmean)
+        pixels.at[i, 3].set(rstd)
         return pixels
     
     pixels = jax.lax.fori_loop(0, len, prepare_output, pixels)
 
     # Sort pixels by ascending NUNIQ index
-    pixels = bayestar_pixels_sort_uniq(pixels, len)
+    pixels = bayestar_pixels_sort_uniq(pixels)
 
     # Calculate log Bayes factor and return
     log_bci = log_bsn = log_evidence_coherent
