@@ -28,6 +28,7 @@ import inspect
 import logging
 import os
 import sys
+import time
 from textwrap import wrap
 
 from astropy.table import Column, Table
@@ -394,11 +395,41 @@ def localize(
             xmax=[2 * np.pi, 1, max_distance, 1, 2 * np.pi, 2 * max_abs_t],
             chain_dump=chain_dump)
     else:
+        # start = time.perf_counter()
         # skymap, log_bci, log_bsn = core.toa_phoa_snr(*args)
+        # end = time.perf_counter()
+        # print(f"TIME: {end - start}")
+        compilea, compileb, compilec = bsm_jax(min_distance, max_distance, prior_distance_power,
+                                           cosmology, gmst, len(toas), snrs[0].shape[0], sample_rate,
+                                           toas, snrs, responses, locations, horizons, rescale_loglikelihood)
+        start = time.perf_counter()
         skymap, log_bci, log_bsn = bsm_jax(min_distance, max_distance, prior_distance_power,
                                            cosmology, gmst, len(toas), snrs[0].shape[0], sample_rate,
                                            toas, snrs, responses, locations, horizons, rescale_loglikelihood)
+        end = time.perf_counter()
+        print(f"TIME: {end - start}")
+        print(skymap)
+
+        # Handle NumPy conversion from JAX
+        skymap, log_bci, log_bsn = np.asarray(skymap), float(log_bci), float(log_bsn)
+        dtype=[('UNIQ', 'i8'), ('PROBDENSITY', 'f8'), ('DISTMEAN', 'f8'), ('DISTSTD', 'f8')]
+        structured = np.zeros(len(skymap), dtype=dtype)
+
+        uniq = skymap[:, 0].astype(np.int64)
+        probdensity = skymap[:, 1]
+        distmean = skymap[:, 2]
+        diststd = skymap[:, 3]
+        structured['UNIQ'] = uniq
+        structured['PROBDENSITY'] = probdensity
+        structured['DISTMEAN'] = distmean
+        structured['DISTSTD'] = diststd
+        
+        skymap = structured
+        print(skymap)
+
+        # Create the table
         skymap = Table(skymap, copy=False)
+
         skymap.meta['log_bci'] = log_bci
         skymap.meta['log_bsn'] = log_bsn
 
