@@ -31,11 +31,12 @@ def ang2vec(theta, phi):
     return jnp.array([sz * jnp.cos(phi), sz * jnp.sin(phi), jnp.cos(theta)])
 
 def nest2uniq64(order, nest):
-    return jnp.where(nest < 0, -1, nest + (1 << 2 * (order + 1)))
+    return jnp.where(nest < 0, -1, nest + (2 ** (2 * (order + 1))))
 
 def uniq2order64(uniq):
-    order = jnp.floor(jnp.log2(uniq)).astype(jnp.int8)
-    return jnp.where(uniq < 4, -1, (order >> 1) - 1)
+    safe_uniq = jnp.maximum(uniq, 1.0)
+    log2u = jnp.log2(safe_uniq)
+    return jnp.maximum((jnp.floor(log2u) // 2 - 1).astype(jnp.int32), 0)
 
 def uniq2pixarea64(uniq):
     order = uniq2order64(uniq)
@@ -43,7 +44,7 @@ def uniq2pixarea64(uniq):
 
 def uniq2nest64(uniq):
     order = uniq2order64(uniq)
-    nest = jnp.where(order < 0, -1, uniq - (1 << 2 * (order + 1)))
+    nest = jnp.where(order < 0, -1, uniq - (2 ** (2 * (order + 1))))
     return order, nest
 
 def build_ctab() -> list[int]:
@@ -56,17 +57,29 @@ def build_ctab() -> list[int]:
 halfpi=1.570796326794896619231321691639751442099
 
 @jit
+def split_64bit(val):
+    val = jnp.uint64(val)
+    low = jnp.uint32(val & jnp.uint64(0xFFFFFFFF))
+    high = jnp.uint32((val >> 32) & jnp.uint64(0xFFFFFFFF))
+    return low, high
+
+@jit
 def compress_bits64(v, ctab):
-    v = jnp.asarray(v, dtype=jnp.uint64)
-    mask = jnp.array(np.uint64(0x5555555555555555), dtype=jnp.uint64)
-    raw = v & mask
-    raw |= raw >> jnp.uint64(15)
-
-    b0 = ctab[raw & 0xff]
-    b1 = ctab[(raw >> 8) & 0xff] << 4
-    b2 = ctab[(raw >> 32) & 0xff] << 16
-    b3 = ctab[(raw >> 40) & 0xff] << 20
-
+    v_low, v_high = split_64bit(v)
+    # Process lower 32 bits
+    mask32 = jnp.uint32(0x55555555)
+    raw_low = v_low & mask32
+    raw_low |= raw_low >> jnp.uint32(15)
+    
+    # Process upper 32 bits  
+    raw_high = v_high & mask32
+    raw_high |= raw_high >> jnp.uint32(15)
+    
+    # Combine results
+    b0 = ctab[raw_low & 0xff]
+    b1 = ctab[(raw_low >> 8) & 0xff] << 4
+    b2 = ctab[raw_high & 0xff] << 16  
+    b3 = ctab[(raw_high >> 8) & 0xff] << 20
     return b0 | b1 | b2 | b3
 
 @jit
@@ -76,14 +89,13 @@ def nest2xyf64(nside, pix, ctab):
     face_num = pix // npface
     pix = pix & (npface - 1)
     ix = compress_bits64(pix, ctab)
-    iy = compress_bits64(pix >> 1, ctab)
+    iy = compress_bits64(pix // 2, ctab)
     return face_num, ix, iy
 
 @jit
 def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
     nl4 = nside * 4
-    npix = 12 * nside * nside
-    fact2 = 4.0 / npix
+    fact2 = 4 / (12 * nside * nside)
 
     face_num, ix, iy = nest2xyf64(nside, pix, ctab)
 
@@ -94,15 +106,15 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
         1.0 - (jr * jr * fact2),
         jnp.where(
             jr > 3 * nside,
-            1.0 - ((nl4 - jr) ** 2 * fact2),
+            ((nl4 - jr) ** 2 * fact2) - 1.0,
             (2 * nside - jr) * (2 * nside * fact2)
         )
     )
 
     tmp = jnp.where(jr < nside, jr * jr * fact2, (nl4 - jr) ** 2 * fact2)
-    s = jnp.where((jr < nside) | (jr > 3 * nside) & (z > 0.99),
-                  jnp.sqrt(tmp * (2.0 - tmp)),
-                  -5.0)
+    s = jnp.where(((jr < nside) & (z>0.99)) | ((jr > 3*nside) & (z<-0.99)),
+                jnp.sqrt(tmp * (2.0 - tmp)),
+                -5.0)
 
     nr = jnp.where((jr < nside) | (jr > 3 * nside),
                    jnp.where(jr < nside, jr, nl4 - jr),
@@ -114,7 +126,6 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
     jp = jnp.where(jp > nl4, jp - nl4, jp)
     jp = jnp.where(jp < 1, jp + nl4, jp)
 
-    halfpi = jnp.pi / 2
     phi = (jp - (kshift + 1) * 0.5) * (halfpi / nr)
 
     return z, s, phi
@@ -122,7 +133,7 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
 @jit
 def pix2ang_nest64(nside, ipix, ctab, jrll, jpll):
     z, s, phi = pix2ang_nest_z_phi64(nside, ipix, ctab, jrll, jpll)
-    theta = jnp.where(s < -2.0, jnp.arccos(z), jnp.arctan2(s, z))
+    theta = jnp.where(s < -2.0, jnp.acos(z), jnp.atan2(s, z))
     return theta, phi
 
 @jit
@@ -132,7 +143,7 @@ def uniq2ang64(uniq):
     jpll = jnp.array([1,3,5,7,0,2,4,6,1,3,5,7])
     order, nest = uniq2nest64(uniq)
     valid = order >= 0
-    nside = 1 << order
+    nside = 2 ** order
     theta, phi = pix2ang_nest64(nside, nest, ctab, jrll, jpll)
     return jnp.where(valid, theta, 0.0), jnp.where(valid, phi, 0.0)
 
@@ -143,3 +154,24 @@ def test_nest2uniq64(order, nest, uniq):
     print(f"nest2uniq64 Expected: {uniq}, Result: {uniq_result}")
     order_result, nest_result = uniq2nest64(uniq)
     print(f"uniq2nest64 Expected (O/N): {order} {nest}, Result: {order_result} {nest_result}")
+
+def test_uniq2ang64():
+    # Test with some known values
+    order0 = 4
+    test_pixels = [0, 1, 2, 10, 100]
+    
+    for ipix in test_pixels:
+        uniq = nest2uniq64(order0, ipix)
+        theta, phi = uniq2ang64(uniq)
+        print(f"Pixel {ipix}: UNIQ={uniq}, theta={theta:.6f}, phi={phi:.6f}")
+    
+    # Check if consecutive pixels give different angles
+    consecutive_angles = []
+    for ipix in range(10):
+        uniq = nest2uniq64(order0, ipix)
+        theta, phi = uniq2ang64(uniq)
+        consecutive_angles.append((theta, phi))
+    
+    print("\nConsecutive pixel angles:")
+    for i, (theta, phi) in enumerate(consecutive_angles):
+        print(f"  Pixel {i}: theta={theta:.6f}, phi={phi:.6f}")

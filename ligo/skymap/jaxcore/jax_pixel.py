@@ -66,13 +66,15 @@ def antenna_factor(D, ra, dec, gmst):
     F = jnp.sum(vmap(dxdy)(jnp.arange(3)))
     return F
 
+@jit
 def compute_F(responses, horizons, phi, theta, gmst):
     nifos = responses.shape[0]
     F_init = jnp.zeros(nifos, dtype=jnp.complex64)
 
     def body(i, F):
-        val = antenna_factor(responses[i], phi, M_PI_2 - theta, gmst) * horizons[i]
-        return F.at[i].set(val)
+        val = antenna_factor(lax.dynamic_slice(responses, (i, 0, 0), (1, responses.shape[1], responses.shape[2])), phi, M_PI_2 - theta, gmst) * lax.dynamic_slice(horizons, (i,), (1,)) 
+        F = F.at[i].set(val[0])
+        return F
 
     return lax.fori_loop(0, nifos, body, F_init)
 
@@ -143,7 +145,7 @@ def compute_accum(iint, snrs, accum):
 @jit
 def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     # Initialize starting values
-    theta, phi = uniq2ang64(uniq)
+    theta, phi = uniq2ang64(lax.dynamic_slice(pixels, (i, 0), (1, 1))[0, 0])
 
     # Look up antenna factors
     F = compute_F(responses, horizons, phi, theta, gmst)
@@ -224,3 +226,23 @@ def test_eval_snr():
 
         print(result)
         print(expected)
+
+# order0 = 4
+# npix0 = 4000
+# pixels = vmap(lambda ipix: jnp.concatenate([
+#         jnp.array([nest2uniq64(order0, ipix)]),
+#         jnp.zeros(3)
+#     ]))(jnp.arange(npix0))
+# print(pixels)
+
+# theta, phi = uniq2ang64(pixels[1690,0])
+# jax.debug.print("theta: {}, phi: {}", theta, phi)
+
+# def test_bug(pixels):
+#     def body(i, _):
+#         theta, phi = uniq2ang64(lax.dynamic_slice(pixels, (i, 0), (1, 1))[0, 0])
+#         jax.debug.print("i={}, uniq={}, theta={}, phi={}", i, pixels[i,0], theta, phi)
+#         return _
+#     return lax.fori_loop(0, pixels.shape[0], body, None)
+
+# test_bug(pixels)

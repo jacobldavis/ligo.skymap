@@ -67,7 +67,7 @@ def bayestar_pixels_refine(pixels, last_n):
 @jit
 def bayestar_pixels_sort_prob(pixels):
     def compute_score(pixel):
-        uniq = pixel[0].astype(jnp.uint64)
+        uniq = pixel[0]
         logp = pixel[1]
         order = uniq2order64(uniq)
         return logp - 2 * M_LN2 * order
@@ -103,10 +103,10 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     
     # Initialize pixels
     order0 = 4
-    nside = 1 << order0
+    nside = 2 ** order0
     npix0 = 12 * nside * nside
     pixels = vmap(lambda ipix: jnp.concatenate([
-        jnp.array([nest2uniq64(order0, ipix)], dtype=jnp.float64),
+        jnp.array([nest2uniq64(order0, ipix)]),
         jnp.zeros(3)
     ]))(jnp.arange(npix0))
 
@@ -119,11 +119,11 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         return bsm_pixel_jax(
             integrators_values, 1, 2, i, iifo, pixels[i, 0], accum,
             gmst, 1, nsamples, sample_rate,
-            lax.dynamic_slice(epochs, (iifo,), (2,)), 
-            lax.dynamic_slice(snrs, (iifo, 0, 0), (2, snrs.shape[1], snrs.shape[2])), 
-            lax.dynamic_slice(responses, (iifo, 0, 0), (2, responses.shape[1], responses.shape[2])),
-            lax.dynamic_slice(locations, (iifo, 0), (2, locations.shape[1])), 
-            lax.dynamic_slice(horizons, (iifo,), (2,)),
+            lax.dynamic_slice(epochs, (iifo,), (1,)), 
+            lax.dynamic_slice(snrs, (iifo, 0, 0), (1, snrs.shape[1], snrs.shape[2])), 
+            lax.dynamic_slice(responses, (iifo, 0, 0), (1, responses.shape[1], responses.shape[2])),
+            lax.dynamic_slice(locations, (iifo, 0), (1, locations.shape[1])), 
+            lax.dynamic_slice(horizons, (iifo,), (1,)),
             rescale_loglikelihood
         )
     
@@ -198,7 +198,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     # --- DONE SECTION ---
 
     # Rescale so that log(max) = 0
-    max_logp = pixels[len-1, 1]
+    max_logp = jnp.max(pixels[:, 1])
 
     @jit
     def log_rescale(i, pixels):
@@ -226,11 +226,11 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         prob = jnp.exp(pixels[i, 1]) * norm 
         rmean = jnp.exp(pixels[i, 2] - pixels[i, 1])
         rstd = jnp.exp(pixels[i, 3] - pixels[i, 1]) - (rmean * rmean)
-        rmean = jnp.where(rstd >= 0, jnp.inf, rmean)
+        rmean = jnp.where(rstd >= 0, rmean, jnp.inf)
         rstd = jnp.where(rstd >= 0, jnp.sqrt(rstd), 1)
-        pixels.at[i, 1].set(prob)
-        pixels.at[i, 2].set(rmean)
-        pixels.at[i, 3].set(rstd)
+        pixels = pixels.at[i, 1].set(prob)
+        pixels = pixels.at[i, 2].set(rmean)
+        pixels = pixels.at[i, 3].set(rstd)
         return pixels
     
     pixels = jax.lax.fori_loop(0, len, prepare_output, pixels)
