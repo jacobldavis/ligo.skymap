@@ -135,3 +135,11 @@ def uniq2ang64(uniq):
     nside = 1 << order
     theta, phi = pix2ang_nest64(nside, nest, ctab, jrll, jpll)
     return jnp.where(valid, theta, 0.0), jnp.where(valid, phi, 0.0)
+
+# --- TEST SUITE ---
+
+def test_nest2uniq64(order, nest, uniq):
+    uniq_result = nest2uniq64(order, nest)
+    print(f"nest2uniq64 Expected: {uniq}, Result: {uniq_result}")
+    order_result, nest_result = uniq2nest64(uniq)
+    print(f"uniq2nest64 Expected (O/N): {order} {nest}, Result: {order_result} {nest_result}")
