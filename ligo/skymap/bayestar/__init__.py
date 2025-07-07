@@ -408,7 +408,6 @@ def localize(
                                            toas, snrs, responses, locations, horizons, rescale_loglikelihood)
         end = time.perf_counter()
         print(f"TIME: {end - start}")
-        print(skymap)
 
         # Handle NumPy conversion from JAX
         skymap, log_bci, log_bsn = np.asarray(skymap), float(log_bci), float(log_bsn)
@@ -423,12 +422,11 @@ def localize(
         structured['PROBDENSITY'] = probdensity
         structured['DISTMEAN'] = distmean
         structured['DISTSTD'] = diststd
-        
         skymap = structured
-        print(skymap)
 
         # Create the table
         skymap = Table(skymap, copy=False)
+        print(skymap)
 
         skymap.meta['log_bci'] = log_bci
         skymap.meta['log_bsn'] = log_bsn
