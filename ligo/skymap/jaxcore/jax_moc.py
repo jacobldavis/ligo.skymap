@@ -26,38 +26,132 @@ M_LN2 = jnp.log(2)
 ntwopsi = 10
 nu = 10
 
+# --- MOC AND HEALPIX FUNCTIONS ---
+
 def ang2vec(theta, phi):
+    """Convert spherical coordinates to 3D Cartesian vector.
+
+    Parameters
+    ----------
+    theta : float
+        Polar angle in radians.
+    phi : float
+        Azimuthal angle in radians.
+
+    Returns
+    -------
+    array_like
+        3D unit vector corresponding to (theta, phi).
+    """
     sz = jnp.sin(theta)
     return jnp.array([sz * jnp.cos(phi), sz * jnp.sin(phi), jnp.cos(theta)])
 
+@jit
 def nest2uniq64(order, nest):
+    """Convert NESTED pixel index to UNIQ64 format.
+
+    Parameters
+    ----------
+    order : int
+        HEALPix resolution order.
+    nest : int
+        Pixel index in NESTED scheme.
+
+    Returns
+    -------
+    int
+        Unique pixel index in UNIQ64 format.
+    """
     return jnp.where(nest < 0, -1, nest + (2 ** (2 * (order + 1))))
 
+@jit
 def uniq2order64(uniq):
+    """Extract the HEALPix order from a UNIQ64 pixel index.
+
+    Parameters
+    ----------
+    uniq : int
+        Pixel index in UNIQ64 format.
+
+    Returns
+    -------
+    int
+        HEALPix resolution order.
+    """
     safe_uniq = jnp.maximum(uniq, 1.0)
     log2u = jnp.log2(safe_uniq)
     return jnp.maximum((jnp.floor(log2u) // 2 - 1).astype(jnp.int32), 0)
 
+@jit
 def uniq2pixarea64(uniq):
+    """Compute pixel area in steradians from a UNIQ64 index.
+
+    Parameters
+    ----------
+    uniq : int
+        UNIQ64 pixel index.
+
+    Returns
+    -------
+    float
+        Pixel area in steradians.
+    """
     order = uniq2order64(uniq)
     return jnp.where(order < 0, jnp.nan, jnp.ldexp(jnp.pi / 3, -2 * order))
 
+@jit
 def uniq2nest64(uniq):
+    """Convert UNIQ64 index to (order, NESTED index).
+
+    Parameters
+    ----------
+    uniq : int
+        UNIQ64 pixel index.
+
+    Returns
+    -------
+    tuple
+        order : int
+            HEALPix resolution order.
+        nest : int
+            Pixel index in NESTED scheme.
+    """
     order = uniq2order64(uniq)
     nest = jnp.where(order < 0, -1, uniq - (2 ** (2 * (order + 1))))
     return order, nest
 
-def build_ctab() -> list[int]:
+@jit
+def build_ctab():
+    """Build the compression lookup table for bit interleaving.
+
+    Returns
+    -------
+    list
+        Lookup table used to compress 64-bit values to HEALPix xy-faces.
+    """
     def Z(a): return [a, a+1, a+256, a+257]
     def Y(a): return Z(a) + Z(a+2) + Z(a+512) + Z(a+514)
     def X(a): return Y(a) + Y(a+4) + Y(a+1024) + Y(a+1028)
 
     return X(0) + X(8) + X(2048) + X(2056)
 
-halfpi=1.570796326794896619231321691639751442099
-
 @jit
 def split_64bit(val):
+    """Split a 64-bit integer into two 32-bit parts.
+
+    Parameters
+    ----------
+    val : uint64
+        64-bit input value.
+
+    Returns
+    -------
+    tuple
+        low : uint32
+            Lower 32 bits.
+        high : uint32
+            Upper 32 bits.
+    """
     val = jnp.uint64(val)
     low = jnp.uint32(val & jnp.uint64(0xFFFFFFFF))
     high = jnp.uint32((val >> 32) & jnp.uint64(0xFFFFFFFF))
@@ -65,6 +159,20 @@ def split_64bit(val):
 
 @jit
 def compress_bits64(v, ctab):
+    """Compress bits from a 64-bit integer using a lookup table.
+
+    Parameters
+    ----------
+    v : uint64
+        Pixel index.
+    ctab : array_like
+        Compression table built from `build_ctab`.
+
+    Returns
+    -------
+    int
+        Compressed value with interleaved bits.
+    """
     v_low, v_high = split_64bit(v)
     # Process lower 32 bits
     mask32 = jnp.uint32(0x55555555)
@@ -84,6 +192,25 @@ def compress_bits64(v, ctab):
 
 @jit
 def nest2xyf64(nside, pix, ctab):
+    """Convert NESTED pixel index to (face, x, y) on the HEALPix grid.
+
+    Parameters
+    ----------
+    nside : int
+        HEALPix resolution parameter.
+    pix : int
+        Pixel index in NESTED scheme.
+    ctab : array_like
+        Compression lookup table.
+
+    Returns
+    -------
+    tuple
+        face_num : int
+            HEALPix face index.
+        ix, iy : int
+            x and y coordinates within the face.
+    """
     npface = nside * nside
     pix = jnp.asarray(pix, dtype=jnp.int64)
     face_num = pix // npface
@@ -94,6 +221,29 @@ def nest2xyf64(nside, pix, ctab):
 
 @jit
 def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
+    """Convert NESTED pixel index to z and phi coordinates.
+
+    Parameters
+    ----------
+    nside : int
+        HEALPix resolution parameter.
+    pix : int
+        NESTED pixel index.
+    ctab : array_like
+        Bit compression table.
+    jrll, jpll : array_like
+        Face row/column metadata.
+
+    Returns
+    -------
+    tuple
+        z : float
+            Cos(theta) coordinate.
+        s : float
+            Auxiliary sine projection value.
+        phi : float
+            Azimuthal angle in radians.
+    """
     nl4 = nside * 4
     fact2 = 4 / (12 * nside * nside)
 
@@ -126,18 +276,54 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
     jp = jnp.where(jp > nl4, jp - nl4, jp)
     jp = jnp.where(jp < 1, jp + nl4, jp)
 
-    phi = (jp - (kshift + 1) * 0.5) * (halfpi / nr)
+    phi = (jp - (kshift + 1) * 0.5) * ((jnp.pi/2) / nr)
 
     return z, s, phi
 
 @jit
 def pix2ang_nest64(nside, ipix, ctab, jrll, jpll):
+    """Convert NESTED pixel index to (theta, phi) angular coordinates.
+
+    Parameters
+    ----------
+    nside : int
+        HEALPix resolution.
+    ipix : int
+        Pixel index in NESTED ordering.
+    ctab : array_like
+        Compression table.
+    jrll, jpll : array_like
+        Lookup tables for face geometry.
+
+    Returns
+    -------
+    tuple
+        theta : float
+            Polar angle.
+        phi : float
+            Azimuthal angle.
+    """
     z, s, phi = pix2ang_nest_z_phi64(nside, ipix, ctab, jrll, jpll)
     theta = jnp.where(s < -2.0, jnp.acos(z), jnp.atan2(s, z))
     return theta, phi
 
 @jit
 def uniq2ang64(uniq):
+    """Convert a UNIQ64 index to spherical (theta, phi) coordinates.
+
+    Parameters
+    ----------
+    uniq : int
+        Pixel index in UNIQ64 format.
+
+    Returns
+    -------
+    tuple
+        theta : float
+            Polar angle in radians.
+        phi : float
+            Azimuthal angle in radians.
+    """
     ctab = jnp.array(build_ctab())
     jrll = jnp.array([2,2,2,2,3,3,3,3,4,4,4,4])
     jpll = jnp.array([1,3,5,7,0,2,4,6,1,3,5,7])

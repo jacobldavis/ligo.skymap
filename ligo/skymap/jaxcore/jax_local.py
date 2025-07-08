@@ -27,6 +27,21 @@ from .jax_pixel import *
 
 @jit
 def logsumexp(accum, log_weight):
+    """
+    Compute log-sum-exp across interferometers with numerical stability.
+
+    Parameters
+    ----------
+    accum : array_like
+        Log-likelihood values for each interferometer.
+    log_weight : float
+        Logarithmic weight applied to the result.
+
+    Returns
+    -------
+    float
+        Final normalized log-evidence value.
+    """
     max_accum = jnp.max(accum, axis=0) 
     shifted = accum - max_accum 
     sum_accum = jnp.sum(jnp.exp(shifted), axis=0)
@@ -35,6 +50,23 @@ def logsumexp(accum, log_weight):
 
 @jit
 def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
+    """
+    Refine pixels by splitting the last_n entries into 4 child pixels each.
+
+    Parameters
+    ----------
+    pixels : array_like
+        Current array of pixels.
+    last_n : int
+        Number of pixels to refine.
+    new_pixels : array_like
+        Pre-allocated array of size `len(pixels) + 3*last_n`.
+
+    Returns
+    -------
+    tuple
+        Refined pixel array and its new length.
+    """
     length = pixels.shape[0]
     new_length = new_pixels.shape[0]
 
@@ -59,6 +91,21 @@ def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
     return new_pixels, new_length
 
 def bayestar_pixels_refine(pixels, last_n):
+    """
+    Interface for pixel refinement, allocating new space and invoking the core function.
+
+    Parameters
+    ----------
+    pixels : array_like
+        Input pixel array.
+    last_n : int
+        Number of pixels to split.
+
+    Returns
+    -------
+    tuple
+        Refined pixel array and new length.
+    """
     length = pixels.shape[0]
     new_length = length + 3 * last_n
     new_pixels = jnp.zeros((new_length, 4), dtype=pixels.dtype) 
@@ -66,6 +113,19 @@ def bayestar_pixels_refine(pixels, last_n):
 
 @jit
 def bayestar_pixels_sort_prob(pixels):
+    """
+    Sort pixels in descending order of posterior probability corrected for pixel order.
+
+    Parameters
+    ----------
+    pixels : array_like
+        Pixel array with log-probability in column 1.
+
+    Returns
+    -------
+    array_like
+        Sorted pixel array.
+    """
     def compute_score(pixel):
         uniq = pixel[0]
         logp = pixel[1]
@@ -74,12 +134,25 @@ def bayestar_pixels_sort_prob(pixels):
 
     length = pixels.shape[0] 
     scores = vmap(compute_score)(pixels)
-    sorted_indices = jnp.argsort(-scores)
+    sorted_indices = jnp.argsort(scores)
     sorted_pixels = pixels[sorted_indices]
     return sorted_pixels
 
 @jit 
 def bayestar_pixels_sort_uniq(pixels):
+    """
+    Sort pixels by HEALPix UNIQ index.
+
+    Parameters
+    ----------
+    pixels : array_like
+        Pixel array.
+
+    Returns
+    -------
+    array_like
+        Sorted array.
+    """
     def get_uniq(i):
         return pixels[i,0]
     uniq = vmap(get_uniq)(jnp.arange(pixels.shape[0]))
@@ -90,6 +163,43 @@ def bayestar_pixels_sort_uniq(pixels):
 def bsm_jax(min_distance, max_distance, prior_distance_power, 
             cosmology, gmst, nifos, nsamples, sample_rate, epochs, snrs, 
             responses, locations, horizons, rescale_loglikelihood):
+    """
+    Compute Bayesian sky localization and distance posteriors.
+
+    Parameters
+    ----------
+    min_distance, max_distance : float
+        Bounds for source distance prior.
+    prior_distance_power : float
+        Power-law exponent for distance prior.
+    cosmology : object
+        Cosmology parameters (used in distance conversions).
+    gmst : float
+        Greenwich Mean Sidereal Time.
+    nifos : int
+        Number of detectors.
+    nsamples : int
+        Number of SNR time samples.
+    sample_rate : float
+        Sampling frequency in Hz.
+    epochs : array_like
+        Trigger times for each detector.
+    snrs : array_like
+        SNR time series.
+    responses : array_like
+        Detector tensor responses.
+    locations : array_like
+        Detector positions.
+    horizons : array_like
+        Horizon distances for each detector.
+    rescale_loglikelihood : float
+        Scaling factor for log-likelihood.
+
+    Returns
+    -------
+    tuple
+        Pixel array with posterior, mean, std distance + log Bayes factors.
+    """
     # Initialize integrators
     pmax = jnp.sum(vmap(lambda h: jnp.square(h))(horizons))
     pmax = jnp.sqrt(0.5 * pmax)

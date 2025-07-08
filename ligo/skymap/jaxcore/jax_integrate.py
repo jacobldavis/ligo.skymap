@@ -23,20 +23,32 @@ from jax.scipy.special import i0e
 import jax
 import jax.numpy as jnp
 import time
-import timeit
 from functools import partial
 from ligo.skymap.jaxcore.jax_interp import *
 from ligo.skymap.jaxcore.jax_cosmology import *
 from quadax import quadgk # type: ignore
 
-SQRT_2 = jnp.sqrt(2)
-ETA = 0.01
-
-# --- COSMOLOGY BEGIN ---
+# --- COSMOLOGY ---
 
 # gsl_spline_init
 @jit
 def compute_natural_cubic_spline_coeffs(x, y):
+    """Compute natural cubic spline coefficients for 1D data.
+
+    Parameters
+    ----------
+    x : array_like
+        1D array of strictly increasing x-values (knots).
+    y : array_like
+        1D array of function values at corresponding x.
+
+    Returns
+    -------
+    x_knots : array_like
+        Original x-values.
+    a, b, c, d : array_like
+        Coefficients of the spline segments for evaluating cubic polynomials.
+    """
     n = x.shape[0]
     h = x[1:] - x[:-1]
     alpha = 3 * (y[2:] - y[1:-1]) / h[1:] - 3 * (y[1:-1] - y[:-2]) / h[:-1]
@@ -65,6 +77,22 @@ def compute_natural_cubic_spline_coeffs(x, y):
 # gsl_spline_eval
 @jit
 def evaluate_cubic_spline(x_knots, coeffs, x_eval):
+    """Evaluate cubic spline at a set of points.
+
+    Parameters
+    ----------
+    x_knots : array_like
+        Knot locations (must be sorted in ascending order).
+    coeffs : tuple
+        Tuple of spline coefficients (a, b, c, d).
+    x_eval : array_like
+        Points at which to evaluate the spline.
+
+    Returns
+    -------
+    y_eval : array_like
+        Interpolated values at x_eval.
+    """
     a, b, c, d = coeffs 
     def eval_one(x_val):
         i = jnp.clip(jnp.searchsorted(x_knots, x_val) - 1, 0, x_knots.shape[0] - 2)
@@ -86,6 +114,22 @@ coeffs = (a_s, b_s, c_s, d_s)
 # log_dVC_dVL
 @jit
 def log_dVC_dVL(DL, x_knots, coeffs):
+    """Evaluate log(dVC/dVL) given luminosity distance.
+
+    Parameters
+    ----------
+    DL : float
+        Luminosity distance in Mpc.
+    x_knots : array_like
+        Knot positions in log(DL).
+    coeffs : tuple
+        Spline coefficients (a, b, c, d).
+
+    Returns
+    -------
+    float
+        log(dVC/dVL) evaluated at log(DL).
+    """
     log_DL = jnp.log(DL)
     
     spline_val = evaluate_cubic_spline(x_knots, coeffs, jnp.array([log_DL]))[0]
@@ -99,22 +143,79 @@ def log_dVC_dVL(DL, x_knots, coeffs):
         )
     )
 
-# --- COSMOLOGY END ---
+# --- INTEGRATOR ---
 
 @jit 
 def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
+    """Logarithmic version of radial integrand.
+
+    Parameters
+    ----------
+    r : float
+        Luminosity distance.
+    p, b, k : float
+        Constants of the integrand.
+    cosmology : bool
+        Whether to include cosmology.
+    x_knots : array_like
+        Spline x-knots for dVC/dVL.
+    coeffs : tuple
+        Spline coefficients.
+    scale : float, optional
+        Constant added to stabilize log-domain integration.
+
+    Returns
+    -------
+    float
+        Log of the radial integrand.
+    """
     ret = jnp.log(i0e(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p/r - 0.5 * b/p, 2)
     return jnp.where(cosmology, ret + log_dVC_dVL(r, x_knots, coeffs), ret)
 
 @jit
 def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
-    ret = scale - jnp.pow(p / r - 0.5 * b / p, 2)
+    """Radial integrand used for numerical integration.
 
+    Parameters
+    ----------
+    r : float
+        Radial distance (Mpc).
+    p, b, k : float
+        Model parameters.
+    cosmology : bool
+        Whether to include cosmology.
+    x_knots, coeffs : array_like, tuple
+        Spline knots and coefficients for log(dVC/dVL).
+    scale : float, optional
+        Scale for numerical stability in log-space.
+
+    Returns
+    -------
+    float
+        Value of the integrand at r.
+    """
+    ret = scale - jnp.pow(p / r - 0.5 * b / p, 2)
     multiplier = i0e(b / r) * jnp.power(r, k)
     return jnp.where(cosmology, jnp.exp(ret + log_dVC_dVL(r, x_knots, coeffs)) * multiplier, jnp.exp(ret) * multiplier)
 
 @jit
 def compute_breakpoints(p, b, r1, r2):
+    """Compute quadrature breakpoints for integration.
+
+    Parameters
+    ----------
+    p, b : float
+        Parameters of the integrand.
+    r1, r2 : float
+        Integration bounds.
+
+    Returns
+    -------
+    breakpoints : array_like
+        Array of breakpoints for adaptive integration.
+    nbreakpoints : int
+        Number of valid breakpoints.
+    """
     eta = 0.01
     pinv = 1.0 / p
     log_eta = jnp.log(eta)
@@ -161,6 +262,28 @@ def compute_breakpoints(p, b, r1, r2):
 
 @jit
 def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
+    """Compute the log of the integral over the radial distance.
+
+    Parameters
+    ----------
+    xmin, ymin : float
+        Lower bounds of the log(p), log(b) grid.
+    ix, iy : int
+        Indices into the grid.
+    d : float
+        Grid step size in both x and y.
+    r1, r2 : float
+        Integration bounds.
+    k : float
+        Power-law exponent.
+    cosmology : bool
+        Whether to apply cosmological volume correction.
+
+    Returns
+    -------
+    float
+        Logarithm of the integral value.
+    """
     # Compute p and b
     x = xmin + ix * d
     y = ymin + iy * d 
@@ -186,6 +309,28 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     return jnp.log(result) + log_offset
 
 class log_radial_integrator:
+    """Adaptive log-domain radial integral evaluator using cubic/bicubic interpolation.
+
+    Parameters
+    ----------
+    r1, r2 : float
+        Integration bounds in Mpc.
+    k : float
+        Exponent for radial power-law.
+    cosmology : bool
+        If True, include comoving volume factor.
+    pmax : float
+        Maximum value of parameter p.
+    size : int
+        Number of grid points in interpolation domain.
+
+    Attributes
+    ----------
+    region0 : bicubic_interp
+        2D interpolation over (log(p), log(b)) domain.
+    region1, region2 : cubic_interp
+        1D interpolation over boundaries of region0.
+    """
     def __init__(self, r1, r2, k, cosmology, pmax, size):
         # Initialize constant values
         alpha = 4
@@ -217,6 +362,24 @@ class log_radial_integrator:
     @staticmethod
     @jit
     def log_radial_integrator_eval(region0, region1, region2, limits, p, b, log_p, log_b):
+        """Evaluate log radial integral at (p, b) using precomputed interpolants.
+
+        Parameters
+        ----------
+        region0, region1, region2 : tuple
+            Interpolator parameters for interior and boundary.
+        limits : tuple
+            (p0_limit, vmax, ymax) bounding behavior for fallback cases.
+        p, b : float
+            Parameters.
+        log_p, log_b : float
+            Precomputed logarithms of p and b.
+
+        Returns
+        -------
+        float
+            Approximation of the log integral value.
+        """
         fx, x0, xlength, a = region0
         f1, t01, length1, a1 = region1
         f2, t02, length2, a2 = region2 

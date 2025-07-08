@@ -26,6 +26,19 @@ from ligo.skymap.jaxcore.jax_cosmology import *
 from ligo.skymap.jaxcore.jax_moc import *
 
 def extract_integrator_regions(integrators):
+    """
+    Extract region parameters from each log_radial_integrator.
+
+    Parameters
+    ----------
+    integrators : list
+        List of log_radial_integrator objects.
+
+    Returns
+    -------
+    list of tuples
+        Each tuple contains region0, region1, and region2 parameters.
+    """
     result = []
     for integrator in integrators:
         result.append((
@@ -36,12 +49,38 @@ def extract_integrator_regions(integrators):
     return result 
 
 def extract_integrator_limits(integrators):
+    """
+    Extract the p0_limit, vmax, and ymax constants for each integrator.
+
+    Parameters
+    ----------
+    integrators : list
+        List of log_radial_integrator objects.
+
+    Returns
+    -------
+    list of tuples
+        Each tuple contains (p0_limit, vmax, ymax).
+    """
     result = []
     for integrator in integrators:
         result.append((integrator.p0_limit, integrator.vmax, integrator.ymax))
     return result
 
 def u_points_weights_init(nu):
+    """
+    Compute Gaussian quadrature nodes and log-weights for u integration.
+
+    Parameters
+    ----------
+    nu : int
+        Number of quadrature nodes.
+
+    Returns
+    -------
+    jnp.ndarray
+        Array of shape (nu, 2) where [:,0] are the u-values and [:,1] are log(weights).
+    """
     points, weights = np.polynomial.legendre.leggauss(nu)
 
     u_points_weights = np.column_stack((points, np.log(weights)))
@@ -51,6 +90,25 @@ u_points_weights = u_points_weights_init(nu)
 
 @jit
 def antenna_factor(D, ra, dec, gmst):
+    """
+    Compute antenna factors from the detector response tensor and source sky location.
+
+    Parameters
+    ----------
+    D : array_like
+        Detector tensor.
+    ra : float
+        Right ascension.
+    dec : float
+        Declination.
+    gmst : float
+        Greenwich mean sidereal time.
+
+    Returns
+    -------
+    complex
+        Complex-valued antenna factor (F_plus + i F_cross).
+    """
     gha = gmst - ra
     cosgha = jnp.cos(gha)
     singha = jnp.sin(gha)
@@ -68,6 +126,27 @@ def antenna_factor(D, ra, dec, gmst):
 
 @jit
 def compute_F(responses, horizons, phi, theta, gmst):
+    """
+    Compute the complex antenna response F for each interferometer.
+
+    Parameters
+    ----------
+    responses : array_like
+        Tensor responses of shape (nifo, 3, 3).
+    horizons : array_like
+        Detector horizon distances.
+    phi : float
+        Source azimuthal angle.
+    theta : float
+        Source polar angle.
+    gmst : float
+        Greenwich mean sidereal time.
+
+    Returns
+    -------
+    array
+        Complex response factors for each detector.
+    """
     nifos = responses.shape[0]
     F_init = jnp.zeros(nifos, dtype=jnp.complex64)
 
@@ -88,6 +167,23 @@ def exp_i(phi):
 
 @jit 
 def eval_snr(x, nsamples, t):
+    """
+    Evaluate interpolated complex SNR at fractional sample index.
+
+    Parameters
+    ----------
+    x : array_like
+        SNR values (magnitude, phase).
+    nsamples : int
+        Total number of SNR samples.
+    t : float
+        Time index to interpolate at.
+
+    Returns
+    -------
+    complex
+        Interpolated SNR value, or 0 outside valid range.
+    """
     i = jnp.floor(t).astype(jnp.int32)
     f = t - i
     return jnp.where(jnp.logical_and(i >= 1, i < nsamples - 2), catrom(x[i-1][0], x[i][0], x[i+1][0], x[i+2][0], f) * exp_i(
@@ -95,6 +191,27 @@ def eval_snr(x, nsamples, t):
 
 @jit
 def toa_errors(theta, phi, gmst, nifos, locs, toas):
+    """
+    Compute time-of-arrival errors for a given sky location.
+
+    Parameters
+    ----------
+    theta, phi : float
+        Sky coordinates.
+    gmst : float
+        Greenwich mean sidereal time.
+    nifos : int
+        Number of detectors.
+    locs : array_like
+        Detector locations.
+    toas : array_like
+        Nominal arrival times.
+
+    Returns
+    -------
+    array
+        Time delay offsets.
+    """
     n = ang2vec(theta, phi - gmst)
     dot = jnp.dot(locs, n)        
     dt = toas + dot             
@@ -102,17 +219,74 @@ def toa_errors(theta, phi, gmst, nifos, locs, toas):
 
 @jit
 def bayestar_signal_amplitude_model(F, exp_i_twopsi, u, u2):
+    """
+    Compute the complex-valued signal amplitude model for a given inclination.
+
+    Parameters
+    ----------
+    F : array_like
+        Complex antenna factor.
+    exp_i_twopsi : complex
+        e^(i*2*psi), for polarization angle psi.
+    u : float
+        Cosine of the inclination angle.
+    u2 : float
+        Square of the cosine of inclination.
+
+    Returns
+    -------
+    array_like
+        Complex signal amplitude.
+    """
     tmp = F * jnp.conj(exp_i_twopsi)
     return 0.5 * (1 + u2) * jnp.real(tmp) - 1j * u * jnp.imag(tmp)
 
 @jit
 def compute_samplewise_b(z_times_r, snrs_interp_sample, rescale_loglikelihood):
+    """
+    Compute the per-sample normalization constant b and its log.
+
+    Parameters
+    ----------
+    z_times_r : array_like
+        Complex signal template.
+    snrs_interp_sample : array_like
+        Interpolated SNR sample.
+    rescale_loglikelihood : float
+        Normalization factor for log-likelihood.
+
+    Returns
+    -------
+    tuple
+        b value and log(b).
+    """
     I0arg = jnp.sum(jnp.conj(z_times_r) * snrs_interp_sample)
     b_val = jnp.abs(I0arg) * rescale_loglikelihood**2
     return b_val, jnp.log(b_val)
 
 @jit
 def compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood):
+    """
+    Compute likelihood quantities for a specific inclination cosine u.
+
+    Parameters
+    ----------
+    F : array_like
+        Antenna response.
+    exp_i_twopsi : complex
+        e^(i*2*psi), for polarization angle psi.
+    u : float
+        Cosine of inclination.
+    snrs_interp : array_like
+        Interpolated SNR time series.
+    rescale_loglikelihood : float
+        Likelihood normalization factor.
+
+    Returns
+    -------
+    tuple
+        Marginalized likelihood p, log(p), samplewise b values and log(b) values.
+    """
     u2 = u * u
 
     z_times_r = vmap(lambda Fi: bayestar_signal_amplitude_model(Fi, exp_i_twopsi, u, u2))(F)
@@ -126,6 +300,27 @@ def compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood):
 
 @jit
 def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood):
+    """
+    Evaluate marginalized likelihood for all inclination angles at a fixed 2ψ.
+
+    Parameters
+    ----------
+    F : array_like
+        Antenna response.
+    snrs_interp : array_like
+        Interpolated SNR values.
+    itwopsi : int
+        Index of current polarization angle.
+    ntwopsi : int
+        Total number of polarization angles.
+    rescale_loglikelihood : float
+        Normalization constant.
+
+    Returns
+    -------
+    tuple
+        Arrays of p, log(p), b values, and log(b) for each u.
+    """
     twopsi = (2 * jnp.pi / ntwopsi) * itwopsi
     exp_i_twopsi = exp_i(twopsi)
 
@@ -137,6 +332,23 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
 
 @jit
 def compute_accum(iint, snrs, accum):
+    """
+    Integrate over inclination and polarization to compute log-evidence.
+
+    Parameters
+    ----------
+    iint : int
+        Index of the integrator region (0, 1, or 2).
+    snrs : array_like
+        Original SNR data.
+    accum : array_like
+        Array of log-integrands.
+
+    Returns
+    -------
+    float
+        Log of total accumulated value.
+    """
     nsamples = snrs.shape[1]
     max_accum = jnp.max(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: accum[iint][itwopsi][iu][isample])(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
     accum1 = jnp.sum(vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: jnp.exp(accum[iint][itwopsi][iu][isample] - max_accum))(jnp.arange(nsamples)))(jnp.arange(nu)))(jnp.arange(ntwopsi)))
@@ -144,6 +356,57 @@ def compute_accum(iint, snrs, accum):
 
 @jit
 def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+    """
+    Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
+
+    Parameters
+    ----------
+    integrators : list
+        Tupled radial integrators (region functions and limits).
+    nint : int
+        Number of integration regions to compute (1-3).
+    flag : int
+        Controls where results are stored (see below).
+    i : int
+        Index of the pixel in the array.
+    iifo : int
+        Detector index.
+    uniq : int
+        UNIQ HEALPix index.
+    pixels : array_like
+        Pixel data array to modify.
+    gmst : float
+        Greenwich Mean Sidereal Time.
+    nifos : int
+        Number of interferometers.
+    nsamples : int
+        Number of SNR time samples.
+    sample_rate : float
+        Sampling rate in Hz.
+    epochs : array_like
+        Arrival time offsets per detector.
+    snrs : array_like
+        Complex-valued SNR time series.
+    responses : array_like
+        Detector tensor responses.
+    locations : array_like
+        Detector locations.
+    horizons : array_like
+        Horizon distances.
+    rescale_loglikelihood : float
+        Factor for log-likelihood normalization.
+
+    Returns
+    -------
+    array_like
+        Modified pixels array.
+
+    Notes
+    -----
+    If flag == 1: store result in pixels[i][1]
+    If flag == 2: store result in pixels[i][iifo]
+    If flag == 3: store results in pixels[i][2] and pixels[i][3]
+    """
     # Initialize starting values
     theta, phi = uniq2ang64(lax.dynamic_slice(pixels, (i, 0), (1, 1))[0, 0])
 
@@ -210,7 +473,8 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     )
     return pixels
 
-# --- TESTS ---
+# --- TEST SUITE ---
+
 def test_eval_snr():
     nsamples = 64
     x = np.zeros((nsamples, 2))
@@ -227,22 +491,23 @@ def test_eval_snr():
         print(result)
         print(expected)
 
-# order0 = 4
-# npix0 = 4000
-# pixels = vmap(lambda ipix: jnp.concatenate([
-#         jnp.array([nest2uniq64(order0, ipix)]),
-#         jnp.zeros(3)
-#     ]))(jnp.arange(npix0))
-# print(pixels)
+def test_pixels_tracer():
+    order0 = 4
+    npix0 = 4000
+    pixels = vmap(lambda ipix: jnp.concatenate([
+            jnp.array([nest2uniq64(order0, ipix)]),
+            jnp.zeros(3)
+        ]))(jnp.arange(npix0))
+    print(pixels)
 
-# theta, phi = uniq2ang64(pixels[1690,0])
-# jax.debug.print("theta: {}, phi: {}", theta, phi)
+    theta, phi = uniq2ang64(pixels[1690,0])
+    jax.debug.print("theta: {}, phi: {}", theta, phi)
 
-# def test_bug(pixels):
-#     def body(i, _):
-#         theta, phi = uniq2ang64(lax.dynamic_slice(pixels, (i, 0), (1, 1))[0, 0])
-#         jax.debug.print("i={}, uniq={}, theta={}, phi={}", i, pixels[i,0], theta, phi)
-#         return _
-#     return lax.fori_loop(0, pixels.shape[0], body, None)
+    def test_bug(pixels):
+        def body(i, _):
+            theta, phi = uniq2ang64(lax.dynamic_slice(pixels, (i, 0), (1, 1))[0, 0])
+            jax.debug.print("i={}, uniq={}, theta={}, phi={}", i, pixels[i,0], theta, phi)
+            return _
+        return lax.fori_loop(0, pixels.shape[0], body, None)
 
-# test_bug(pixels)
+    test_bug(pixels)
