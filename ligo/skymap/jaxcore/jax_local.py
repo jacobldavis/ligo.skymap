@@ -48,7 +48,7 @@ def logsumexp(accum, log_weight):
     result = jnp.log(sum_accum) + max_accum + log_weight
     return result
 
-@jit
+@partial(jit, static_argnames=['last_n'])
 def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
     """
     Refine pixels by splitting the last_n entries into 4 child pixels each.
@@ -68,19 +68,21 @@ def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
         Refined pixel array and its new length.
     """
     length = pixels.shape[0]
+    length = pixels.shape[0]
     new_length = new_pixels.shape[0]
+    prefix_len = length - last_n
 
-    new_pixels = lax.dynamic_update_slice(new_pixels, pixels, (0, 0))
+    pixels_prefix = lax.dynamic_slice(pixels, (0, 0), (prefix_len, 4))
+    new_pixels = lax.dynamic_update_slice(new_pixels, pixels_prefix, (0, 0))
 
     def refine_loop(i, new_pixels):
         parent_idx = length - i - 1
         parent_pixel = pixels[parent_idx]
         parent_uniq = parent_pixel[0]
-        aux_data = parent_pixel[1:4]
 
         base_uniq = 4 * parent_uniq
         child_uniqs = jnp.arange(4, dtype=pixels.dtype) + base_uniq
-        child_aux = jnp.tile(aux_data[None, :], (4, 1))
+        child_aux = jnp.zeros((4, 3), dtype=pixels.dtype)
         new_children = jnp.concatenate([child_uniqs[:, None], child_aux], axis=1)
 
         dest_idx = new_length - 4 * i - 4
@@ -285,7 +287,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
             pixels
         )
 
-        # Sort
+        # Sort pixels by ascending posterior probability
         pixels = bayestar_pixels_sort_prob(pixels)
 
         return (pixels, length)
@@ -308,16 +310,13 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     # --- DONE SECTION ---
 
     # Rescale so that log(max) = 0
-    max_logp = jnp.max(pixels[:, 1])
+    max_logp = pixels[len-1, 1]
 
     @jit
-    def log_rescale(i, pixels):
-        pixels = pixels.at[i, 1].set(pixels[i, 1] - max_logp)
-        pixels = pixels.at[i, 2].set(pixels[i, 2] - max_logp)
-        pixels = pixels.at[i, 3].set(pixels[i, 3] - max_logp)
-        return pixels
+    def rescale_pixel(px):
+        return px.at[1:].add(-max_logp)
 
-    pixels = jax.lax.fori_loop(0, len, log_rescale, pixels)
+    pixels = vmap(rescale_pixel)(pixels)
 
     # Determine normalization of map
     @jit
