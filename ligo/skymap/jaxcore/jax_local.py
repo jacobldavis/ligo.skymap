@@ -315,7 +315,6 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     @jit
     def rescale_pixel(px):
         return px.at[1:].add(-max_logp)
-
     pixels = vmap(rescale_pixel)(pixels)
 
     # Determine normalization of map
@@ -331,18 +330,17 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Rescale, normalize, and prepare output
     @jit
-    def prepare_output(i, pixels):
-        prob = jnp.exp(pixels[i, 1]) * norm 
-        rmean = jnp.exp(pixels[i, 2] - pixels[i, 1])
-        rstd = jnp.exp(pixels[i, 3] - pixels[i, 1]) - (rmean * rmean)
+    def prepare_output(px):
+        prob = jnp.exp(px[1]) * norm 
+        rmean = jnp.exp(px[2] - px[1])
+        rstd = jnp.exp(px[3] - px[1]) - (rmean * rmean)
         rmean = jnp.where(rstd >= 0, rmean, jnp.inf)
         rstd = jnp.where(rstd >= 0, jnp.sqrt(rstd), 1)
-        pixels = pixels.at[i, 1].set(prob)
-        pixels = pixels.at[i, 2].set(rmean)
-        pixels = pixels.at[i, 3].set(rstd)
-        return pixels
-    
-    pixels = jax.lax.fori_loop(0, len, prepare_output, pixels)
+        px = px.at[1].set(prob)
+        px = px.at[2].set(rmean)
+        px = px.at[3].set(rstd)
+        return px
+    pixels = vmap(prepare_output)(pixels)
 
     # Sort pixels by ascending NUNIQ index
     pixels = bayestar_pixels_sort_uniq(pixels)
