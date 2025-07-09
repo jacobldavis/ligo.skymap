@@ -96,7 +96,7 @@ def antenna_factor(D, ra, dec, gmst):
     Parameters
     ----------
     D : array_like
-        Detector tensor.
+        Detector tensor (3,3).
     ra : float
         Right ascension.
     dec : float
@@ -150,12 +150,11 @@ def compute_F(responses, horizons, phi, theta, gmst):
     nifos = responses.shape[0]
     F_init = jnp.zeros(nifos, dtype=jnp.complex64)
 
-    def body(i, F):
+    def body(i):
         val = antenna_factor(lax.dynamic_slice(responses, (i, 0, 0), (1, responses.shape[1], responses.shape[2])), phi, M_PI_2 - theta, gmst) * lax.dynamic_slice(horizons, (i,), (1,)) 
-        F = F.at[i].set(val[0])
-        return F
+        return val[0]
 
-    return lax.fori_loop(0, nifos, body, F_init)
+    return vmap(lambda i: body(i))(jnp.arange(nifos))
 
 @jit
 def catrom(x0, x1, x2, x3, t):
@@ -355,7 +354,7 @@ def compute_accum(iint, snrs, accum):
     return jnp.log(accum1) + max_accum
 
 @jit
-def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_jax(integrators, flag, i, iifo, pixels, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     """
     Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
 
@@ -363,16 +362,12 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     ----------
     integrators : list
         Tupled radial integrators (region functions and limits).
-    nint : int
-        Number of integration regions to compute (1-3).
     flag : int
         Controls where results are stored (see below).
     i : int
         Index of the pixel in the array.
     iifo : int
         Detector index.
-    uniq : int
-        UNIQ HEALPix index.
     pixels : array_like
         Pixel data array to modify.
     gmst : float

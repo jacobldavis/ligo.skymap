@@ -201,6 +201,9 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     -------
     tuple
         Pixel array with posterior, mean, std distance + log Bayes factors.
+
+    NOTE: We use jax.lax.fori_loop in some cases since vmapping it can exceed memory usage otherwise.
+          Swapping the implementation to use vmap will speed it up, but should only be done if there is enough memory.
     """
     # Initialize integrators
     pmax = jnp.sum(vmap(lambda h: jnp.square(h))(horizons))
@@ -227,9 +230,9 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     accum = jnp.zeros((npix0, nifos))
 
     @jit
-    def accum_map(i, iifo, pixels, accum):
+    def accum_map(i, iifo, accum):
         return bsm_pixel_jax(
-            integrators_values, 1, 2, i, iifo, pixels[i, 0], accum,
+            integrators_values, 2, i, iifo, accum,
             gmst, 1, nsamples, sample_rate,
             lax.dynamic_slice(epochs, (iifo,), (1,)), 
             lax.dynamic_slice(snrs, (iifo, 0, 0), (1, snrs.shape[1], snrs.shape[2])), 
@@ -242,13 +245,13 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     @jit
     def probability_map(i, pixels, accum):
         pixels_out = bsm_pixel_jax(
-            integrators_values, 1, 1, i, 0, pixels[i, 0], pixels,
+            integrators_values, 1, i, 0, pixels,
             gmst, nifos, nsamples, sample_rate,
             epochs, snrs, responses, locations, horizons, rescale_loglikelihood
         )
 
         def accum_iifo(iifo, accum_inner):
-            return accum_map(i, iifo, pixels_out, accum_inner)
+            return accum_map(i, iifo, accum_inner)
 
         accum_out = jax.lax.fori_loop(0, nifos, lambda j, acc: accum_iifo(j, acc), accum)
         return pixels_out, accum_out
@@ -280,7 +283,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         pixels = lax.fori_loop(
             length - npix0, length,
             lambda j, px: bsm_pixel_jax(
-                integrators_values, 1, 1, j, 0, px[j, 0], px,
+                integrators_values, 1, j, 0, px,
                 gmst, nifos, nsamples, sample_rate,
                 epochs, snrs, responses, locations, horizons, rescale_loglikelihood
             ),
@@ -302,7 +305,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Evaluate distance layers
     pixels = jax.lax.fori_loop(0, len, lambda i, 
-            pixels: bsm_pixel_jax(integrators_values, 2, 3, i, 0, pixels[i, 0], pixels,
+            pixels: bsm_pixel_jax(integrators_values, 3, i, 0, pixels,
             gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, 
             locations, horizons, rescale_loglikelihood), pixels
     )

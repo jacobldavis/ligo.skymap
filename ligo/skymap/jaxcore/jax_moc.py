@@ -212,7 +212,7 @@ def nest2xyf64(nside, pix, ctab):
             x and y coordinates within the face.
     """
     npface = nside * nside
-    pix = jnp.asarray(pix, dtype=jnp.int64)
+    pix = jnp.asarray(pix, dtype=jnp.int32)
     face_num = pix // npface
     pix = pix & (npface - 1)
     ix = compress_bits64(pix, ctab)
