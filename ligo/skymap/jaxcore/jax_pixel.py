@@ -430,13 +430,13 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     p, log_p, b, log_b = vmap(process_twopsi)(jnp.arange(ntwopsi))
     
     # Initialize accum with the integrator evaluation
-    accum0 = jnp.where(nint > 0, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+    accum0 = jnp.where(flag != 3, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                                  u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][0][0], integrators[0][0][1], integrators[0][0][2], integrators[1][0], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
                                  (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
-    accum1 = jnp.where(nint > 1, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+    accum1 = jnp.where(flag == 3, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                                  u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][1][0], integrators[0][1][1], integrators[0][1][2], integrators[1][1], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
                                  (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
-    accum2 = jnp.where(nint > 2, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+    accum2 = jnp.where(flag == 3, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                                  u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][2][0], integrators[0][2][1], integrators[0][2][2], integrators[1][2], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
                                  (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
     accum = jnp.array([accum0, accum1, accum2])
@@ -461,13 +461,13 @@ def bsm_pixel_jax(integrators, nint, flag, i, iifo, uniq, pixels, gmst, nifos, n
     )
     pixels = lax.cond(
         flag == 3,
-        lambda px: px.at[i, 2].set(compute_accum(0, snrs, accum)),
+        lambda px: px.at[i, 2].set(compute_accum(1, snrs, accum)),
         lambda px: px,
         pixels
     )
     pixels = lax.cond(
         flag == 3,
-        lambda px: px.at[i, 3].set(compute_accum(1, snrs, accum)),
+        lambda px: px.at[i, 3].set(compute_accum(2, snrs, accum)),
         lambda px: px,
         pixels
     )

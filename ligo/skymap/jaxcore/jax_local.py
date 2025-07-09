@@ -114,7 +114,7 @@ def bayestar_pixels_refine(pixels, last_n):
 @jit
 def bayestar_pixels_sort_prob(pixels):
     """
-    Sort pixels in descending order of posterior probability corrected for pixel order.
+    Sort pixels in ascending order of posterior probability corrected for pixel order.
 
     Parameters
     ----------
