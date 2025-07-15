@@ -16,7 +16,8 @@
 #
 
 import math
-from jax import jit
+from jax import jit, lax
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -25,7 +26,6 @@ M_PI_2 = jnp.pi / 2
 M_LN2 = jnp.log(2)
 ntwopsi = 10
 nu = 10
-
 # --- MOC AND HEALPIX FUNCTIONS ---
 
 def ang2vec(theta, phi):
@@ -78,9 +78,10 @@ def uniq2order64(uniq):
     int
         HEALPix resolution order.
     """
-    safe_uniq = jnp.maximum(uniq, 1.0)
+    safe_uniq = jnp.where(uniq > 0, uniq, 1.0)
     log2u = jnp.log2(safe_uniq)
-    return jnp.maximum((jnp.floor(log2u) // 2 - 1).astype(jnp.int32), 0)
+    order = (jnp.floor(log2u) // 2 - 1).astype(jnp.int32)
+    return jnp.maximum(order, 0)
 
 @jit
 def uniq2pixarea64(uniq):
@@ -117,7 +118,8 @@ def uniq2nest64(uniq):
             Pixel index in NESTED scheme.
     """
     order = uniq2order64(uniq)
-    nest = jnp.where(order < 0, -1, uniq - (2 ** (2 * (order + 1))))
+    two_pow = 2 ** (2 * (order + 1))
+    nest = jnp.where(order < 0, -1, uniq - two_pow)
     return order, nest
 
 @jit
@@ -262,9 +264,8 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
     )
 
     tmp = jnp.where(jr < nside, jr * jr * fact2, (nl4 - jr) ** 2 * fact2)
-    s = jnp.where(((jr < nside) & (z>0.99)) | ((jr > 3*nside) & (z<-0.99)),
-                jnp.sqrt(tmp * (2.0 - tmp)),
-                -5.0)
+    valid_tmp = tmp * (2.0 - tmp)
+    s = jnp.where(valid_tmp > 0.0, jnp.sqrt(valid_tmp), -5.0)
 
     nr = jnp.where((jr < nside) | (jr > 3 * nside),
                    jnp.where(jr < nside, jr, nl4 - jr),
@@ -276,7 +277,7 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
     jp = jnp.where(jp > nl4, jp - nl4, jp)
     jp = jnp.where(jp < 1, jp + nl4, jp)
 
-    phi = (jp - (kshift + 1) * 0.5) * ((jnp.pi/2) / nr)
+    phi = (jp - (kshift + 1) * 0.5) * ((jnp.pi / 2) / nr)
 
     return z, s, phi
 
@@ -304,7 +305,8 @@ def pix2ang_nest64(nside, ipix, ctab, jrll, jpll):
             Azimuthal angle.
     """
     z, s, phi = pix2ang_nest_z_phi64(nside, ipix, ctab, jrll, jpll)
-    theta = jnp.where(s < -2.0, jnp.acos(z), jnp.atan2(s, z))
+    z_clamped = jnp.clip(z, -1.0, 1.0)
+    theta = jnp.where(s < -2.0, jnp.acos(z_clamped), jnp.atan2(s, z_clamped))
     return theta, phi
 
 @jit

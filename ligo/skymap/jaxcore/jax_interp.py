@@ -137,7 +137,7 @@ class cubic_interp:
         a2 = a[ix, 2]
         a3 = a[ix, 3]
 
-        return ((a0 * x + a1) * x + a2) * x + a3
+        return jnp.where(jnp.any(jnp.isnan(data)), data, ((a0 * x + a1) * x + a2) * x + a3)
 
 # --- BICUBIC INTERP ---
 
@@ -293,7 +293,7 @@ class bicubic_interp:
 
             return jnp.where(is_nan, x[0] + x[1], result)
 
-        return eval_point(x)
+        return jnp.where(jnp.any(jnp.isnan(s)) | jnp.any(jnp.isnan(t)), s + t, eval_point(x))
 
 # --- TEST SUITE ---
 

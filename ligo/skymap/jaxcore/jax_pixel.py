@@ -289,7 +289,7 @@ def compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood):
     u2 = u * u
 
     z_times_r = vmap(lambda Fi: bayestar_signal_amplitude_model(Fi, exp_i_twopsi, u, u2))(F)
-    p2 = jnp.sum(jnp.abs(z_times_r) ** 2)
+    p2 = jnp.sum(jnp.real(z_times_r)**2 + jnp.imag(z_times_r)**2)
     p2 *= 0.5 * rescale_loglikelihood**2
     p = jnp.sqrt(p2)
     logp = jnp.log(p)
@@ -403,8 +403,9 @@ def bsm_pixel_jax(integrators, flag, i, iifo, pixels, gmst, nifos, nsamples, sam
     If flag == 3: store results in pixels[i][2] and pixels[i][3]
     """
     # Initialize starting values
-    theta, phi = uniq2ang64(lax.dynamic_slice(pixels, (i, 0), (1, 1))[0, 0])
-
+    uniq = pixels[i, 0]
+    theta, phi = uniq2ang64(uniq)
+    
     # Look up antenna factors
     F = compute_F(responses, horizons, phi, theta, gmst)
 
@@ -412,12 +413,14 @@ def bsm_pixel_jax(integrators, flag, i, iifo, pixels, gmst, nifos, nsamples, sam
     dt = toa_errors(theta, phi, gmst, nifos, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
+    @jit
     def snr_row(isample):
         t = isample - dt * sample_rate - 0.5 * (nsamples - 1) 
         return vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, t)  
     snrs_interp = vmap(snr_row)(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_singal_amplitude_model
+    @jit
     def process_twopsi(itwopsi):
         p_u, log_p_u, b_u, log_b_u = compute_twopsi_slice(
             F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood)
@@ -425,15 +428,29 @@ def bsm_pixel_jax(integrators, flag, i, iifo, pixels, gmst, nifos, nsamples, sam
     p, log_p, b, log_b = vmap(process_twopsi)(jnp.arange(ntwopsi))
     
     # Initialize accum with the integrator evaluation
-    accum0 = jnp.where(flag != 3, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][0][0], integrators[0][0][1], integrators[0][0][2], integrators[1][0], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
-                                 (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
-    accum1 = jnp.where(flag == 3, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][1][0], integrators[0][1][1], integrators[0][1][2], integrators[1][1], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
-                                 (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
-    accum2 = jnp.where(flag == 3, vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                                 u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(integrators[0][2][0], integrators[0][2][1], integrators[0][2][2], integrators[1][2], p[itwopsi][iu], b[itwopsi][iu][isample], log_p[itwopsi][iu], log_b[itwopsi][iu][isample]))
-                                 (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), jnp.array([0]))
+    @jit
+    def safe_eval(integrator_tuple, integrator_b, itwopsi, iu, isample):
+        val = u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(
+            integrator_tuple[0], integrator_tuple[1], integrator_tuple[2],
+            integrator_b, p[itwopsi][iu], b[itwopsi][iu][isample],
+            log_p[itwopsi][iu], log_b[itwopsi][iu][isample])
+        return jnp.where(jnp.isfinite(val), val, -jnp.inf)
+
+    accum0 = jnp.where(flag != 3, 
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
+    accum1 = jnp.where(flag == 3, 
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
+    accum2 = jnp.where(flag == 3, 
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
     accum = jnp.array([accum0, accum1, accum2])
 
     # Compute the final value with max_accum and accum1
