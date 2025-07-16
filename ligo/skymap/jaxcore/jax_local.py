@@ -68,7 +68,6 @@ def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
         Refined pixel array and its new length.
     """
     length = pixels.shape[0]
-    length = pixels.shape[0]
     new_length = new_pixels.shape[0]
     prefix_len = length - last_n
 

@@ -26,6 +26,10 @@ ETA = 0.01
 
 # --- CUBIC INTERP ---
 
+@jit
+def nan_or_inf(x):
+    return jnp.isnan(x) | jnp.isinf(x)
+
 class cubic_interp:
     """1D cubic interpolation using precomputed coefficients.
 
@@ -52,15 +56,14 @@ class cubic_interp:
         Array of shape (n+6, 4) containing cubic coefficients.
     """
     def __init__(self, data, n, tmin, dt):
-        self.f = jnp.float32(1 / dt)
-        self.t0 = 3 - jnp.float32(self.f * tmin)
-        self.length = jnp.int32(n + 6)
-        idx = np.arange(n + 6).astype(np.int32)
-        self.a = self.compute_coeffs(data, n, idx)
+        self.f = 1 / dt
+        self.t0 = 3 - self.f * tmin
+        self.length = n + 6
+        self.a = vmap(lambda idx: self.compute_coeffs(idx, data, n))(jnp.arange(n + 6))
 
     @staticmethod
     @jit
-    def compute_coeffs(data, n, idx):
+    def compute_coeffs(idx, data, n):
         """Compute cubic interpolation coefficients.
 
         Parameters
@@ -78,32 +81,28 @@ class cubic_interp:
             Array of cubic coefficients, shape (n+6, 4).
         """
         # Clip indices and build z
-        z = jnp.stack([
+        z = jnp.array([
             data[jnp.clip(idx - 4, 0, n - 1)],
             data[jnp.clip(idx - 3, 0, n - 1)],
             data[jnp.clip(idx - 2, 0, n - 1)],
             data[jnp.clip(idx - 1, 0, n - 1)],
-        ], axis=1)
-
-        nan_or_inf = lambda x: jnp.isnan(x) | jnp.isinf(x)
-        bad_12 = nan_or_inf(z[:,1]) | nan_or_inf(z[:,2])
-        bad_03 = nan_or_inf(z[:,0]) | nan_or_inf(z[:,3])
+        ])
+        bad12 = nan_or_inf(z[1] + z[2])
+        bad03 = nan_or_inf(z[0] + z[3])
 
         # Compute coefficients
-        a0 = 1.5 * (z[:,1] - z[:,2]) + 0.5 * (z[:,3] - z[:,0])
-        a1 = z[:,0] - 2.5 * z[:,1] + 2 * z[:,2] - 0.5 * z[:,3]
-        a2 = 0.5 * (z[:,2] - z[:,0])
-        a3 = z[:,1]
+        a0 = 1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0])
+        a1 = z[0] - 2.5 * z[1] + 2 * z[2] - 0.5 * z[3]
+        a2 = 0.5 * (z[2] - z[0])
+        a3 = z[1]
 
         # Initialize coefficients
-        out = jnp.stack([
-            jnp.where(bad_12, 0.0, jnp.where(bad_03, 0.0, a0)),
-            jnp.where(bad_12, 0.0, jnp.where(bad_03, 0.0, a1)),
-            jnp.where(bad_12, 0.0, jnp.where(bad_03, a2, a2)),
-            jnp.where(bad_12, z[:,1], a3),
-        ], axis=1)
-
-        return out
+        return jnp.array([
+            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
+            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
+            jnp.where(bad12, 0.0, jnp.where(bad03, z[2]-z[1], a2)),
+            jnp.where(bad12, z[1], a3)
+        ])
 
     @staticmethod
     @jit
@@ -137,17 +136,13 @@ class cubic_interp:
         a2 = a[ix, 2]
         a3 = a[ix, 3]
 
-        return jnp.where(jnp.any(jnp.isnan(data)), data, ((a0 * x + a1) * x + a2) * x + a3)
+        return (x * (x * (x * a0 + a1) + a2) + a3)
 
 # --- BICUBIC INTERP ---
 
 @jit
 def cubic_eval(coeffs, x):
     return ((coeffs[..., 0] * x + coeffs[..., 1]) * x + coeffs[..., 2]) * x + coeffs[..., 3]
-
-@jit
-def nan_or_inf(x):
-    return jnp.isnan(x) | jnp.isinf(x)
 
 @jit
 def interpolate_1d(z):
@@ -163,8 +158,8 @@ def interpolate_1d(z):
     coeffs : jax.numpy.ndarray
         Coefficients for cubic interpolation.
     """
-    bad12 = nan_or_inf(z[1]) | nan_or_inf(z[2])
-    bad03 = nan_or_inf(z[0]) | nan_or_inf(z[3])
+    bad12 = nan_or_inf(z[1] + z[2])
+    bad03 = nan_or_inf(z[0] + z[3])
 
     # Compute coefficients
     a0 = 1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0])
@@ -176,7 +171,7 @@ def interpolate_1d(z):
     return jnp.stack([
         jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
         jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
-        jnp.where(bad12, 0.0, jnp.where(bad03, a2, a2)),
+        jnp.where(bad12, 0.0, jnp.where(bad03, z[2]-z[1], a2)),
         jnp.where(bad12, z[1], a3)
     ])
 

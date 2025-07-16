@@ -148,7 +148,6 @@ def compute_F(responses, horizons, phi, theta, gmst):
         Complex response factors for each detector.
     """
     nifos = responses.shape[0]
-    F_init = jnp.zeros(nifos, dtype=jnp.complex64)
 
     def body(i):
         val = antenna_factor(lax.dynamic_slice(responses, (i, 0, 0), (1, responses.shape[1], responses.shape[2])), phi, M_PI_2 - theta, gmst) * lax.dynamic_slice(horizons, (i,), (1,)) 
@@ -434,7 +433,7 @@ def bsm_pixel_jax(integrators, flag, i, iifo, pixels, gmst, nifos, nsamples, sam
             integrator_tuple[0], integrator_tuple[1], integrator_tuple[2],
             integrator_b, p[itwopsi][iu], b[itwopsi][iu][isample],
             log_p[itwopsi][iu], log_b[itwopsi][iu][isample])
-        return jnp.where(jnp.isfinite(val), val, -jnp.inf)
+        return jnp.where(jnp.isfinite(val), val, u_points_weights[iu][1])
 
     accum0 = jnp.where(flag != 3, 
                     vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 

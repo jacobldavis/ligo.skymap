@@ -78,10 +78,10 @@ def uniq2order64(uniq):
     int
         HEALPix resolution order.
     """
-    safe_uniq = jnp.where(uniq > 0, uniq, 1.0)
-    log2u = jnp.log2(safe_uniq)
-    order = (jnp.floor(log2u) // 2 - 1).astype(jnp.int32)
-    return jnp.maximum(order, 0)
+    safe_uniq = jnp.where(uniq >= 4, uniq, jnp.uint32(4))
+    log2u = jnp.floor(jnp.log2(safe_uniq.astype(jnp.float32)))
+    order = (log2u.astype(jnp.uint32) >> 1) - 1
+    return jnp.where(uniq < 4, -1, order.astype(jnp.int32))
 
 @jit
 def uniq2pixarea64(uniq):
@@ -342,6 +342,28 @@ def test_nest2uniq64(order, nest, uniq):
     print(f"nest2uniq64 Expected: {uniq}, Result: {uniq_result}")
     order_result, nest_result = uniq2nest64(uniq)
     print(f"uniq2nest64 Expected (O/N): {order} {nest}, Result: {order_result} {nest_result}")
+
+# test_nest2uniq64(0, 0, 4)
+# test_nest2uniq64(0, 1, 5)
+# test_nest2uniq64(0, 2, 6)
+# test_nest2uniq64(0, 3, 7)
+# test_nest2uniq64(0, 4, 8)
+# test_nest2uniq64(0, 5, 9)
+# test_nest2uniq64(0, 6, 10)
+# test_nest2uniq64(0, 7, 11)
+# test_nest2uniq64(0, 8, 12)
+# test_nest2uniq64(0, 9, 13)
+# test_nest2uniq64(0, 10, 14)
+# test_nest2uniq64(0, 11, 15)
+# test_nest2uniq64(1, 0, 16)
+# test_nest2uniq64(1, 1, 17)
+# test_nest2uniq64(1, 2, 18)
+# test_nest2uniq64(1, 47, 63)
+# test_nest2uniq64(12, 0, 0x4000000)
+# test_nest2uniq64(12, 1, 0x4000001)
+# test_nest2uniq64(29, 0, 0x1000000000000000)
+# test_nest2uniq64(29, 1, 0x1000000000000001)
+# test_nest2uniq64(29, 0x2FFFFFFFFFFFFFFF, 0x3FFFFFFFFFFFFFFF)
 
 def test_uniq2ang64():
     # Test with some known values

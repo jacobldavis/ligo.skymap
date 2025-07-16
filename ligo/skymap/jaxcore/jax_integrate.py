@@ -225,7 +225,7 @@ def compute_breakpoints(p, b, r1, r2):
     right = 1.0 / (1.0 / middle - jnp.sqrt(-log_eta) * pinv)
 
     # Start with r1
-    breakpoints = jnp.full((5,), jnp.nan)
+    breakpoints = jnp.full((5,), 0)
     breakpoints = breakpoints.at[0].set(r1)
     n = 1
 
@@ -436,3 +436,60 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
 # test_log_radial_integral(-2.43264, 1e-5, 0, 1, 1, 1, 2)
 # test_log_radial_integral(-2.43808, 1e-5, 0.5, 1, 1, 1, 2)
 # test_log_radial_integral(-0.707038, 1e-5, 1, 1.5, 1, 1, 2)
+
+def test_log_radial_integral(r1, r2, p, b, k, cosmology):
+    # Determine breakpoints and log_offset
+    breakpoints, nbreakpoints = compute_breakpoints(p, b, r1, r2)
+    def log_integrand(r):
+        return log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs)
+
+    log_vals = vmap(log_integrand)(breakpoints)
+    log_vals = jnp.where(jnp.isnan(log_vals), -jnp.inf, log_vals)
+    log_offset = jnp.max(log_vals)
+    log_offset = jnp.where(log_offset == -jnp.inf, 0.0, log_offset)
+
+    def integrand(r):
+        return radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, -log_offset)
+
+    # Adaptive quadrature
+    result, _ = quadgk(integrand, [r1,r2], epsrel=1e-8)
+
+    return jnp.log(result) + log_offset
+
+def full_test_log_radial_integral():
+    r1 = 0.0
+    r2 = 0.25
+    pmax = 1.0
+    k = 2
+    integrator = log_radial_integrator(r1, r2, k, 0, pmax, 400)
+    region0 = (integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a)
+    region1 = (integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a)
+    region2 = (integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a)
+    limits = (integrator.p0_limit, integrator.vmax, integrator.ymax)
+
+    p_values = jnp.arange(0.01, pmax + 0.001, 0.01)
+    b_values = jnp.arange(0.0, 2 * pmax + 0.001, 0.01)
+    p_grid, b_grid = jnp.meshgrid(p_values, b_values, indexing="ij")
+    p_flat = p_grid.ravel()
+    b_flat = b_grid.ravel()
+
+    def compute(p, b):
+        expected = jnp.exp(test_log_radial_integral(r1, r2, p, b, k, 0))
+        result = jnp.exp(
+            log_radial_integrator.log_radial_integrator_eval(
+                region0, region1, region2, limits, p, b, jnp.log(p), jnp.log(b)
+            ) - ((0.5 * b / p) ** 2)
+        )
+        return expected, result
+
+    batched_compute = vmap(compute)
+    expected_vals, result_vals = batched_compute(p_flat, b_flat)
+
+    with open("my_file.txt", "w") as f:
+        for i in range(len(expected_vals)):
+            e = expected_vals[i]
+            r = result_vals[i]
+            print(f"Expected: {e}, Result: {r}")
+            f.write(f"Expected: {e}, Result: {r}\n")
+
+# full_test_log_radial_integral()
