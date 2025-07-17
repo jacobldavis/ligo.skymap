@@ -131,11 +131,10 @@ def build_ctab():
     list
         Lookup table used to compress 64-bit values to HEALPix xy-faces.
     """
-    def Z(a): return [a, a+1, a+256, a+257]
-    def Y(a): return Z(a) + Z(a+2) + Z(a+512) + Z(a+514)
-    def X(a): return Y(a) + Y(a+4) + Y(a+1024) + Y(a+1028)
-
-    return X(0) + X(8) + X(2048) + X(2056)
+    def Z(a): return jnp.array([a, a+1, a+256, a+257])
+    def Y(a): return jnp.concatenate([Z(a), Z(a+2), Z(a+512), Z(a+514)])
+    def X(a): return jnp.concatenate([Y(a), Y(a+4), Y(a+1024), Y(a+1028)])
+    return jnp.concatenate([X(0), X(8), X(2048), X(2056)])
 
 @jit
 def split_64bit(val):
@@ -247,7 +246,7 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
             Azimuthal angle in radians.
     """
     nl4 = nside * 4
-    fact2 = 4 / (12 * nside * nside)
+    fact2 = 4.0 / (12.0 * nside * nside)
 
     face_num, ix, iy = nest2xyf64(nside, pix, ctab)
 
@@ -258,14 +257,14 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
         1.0 - (jr * jr * fact2),
         jnp.where(
             jr > 3 * nside,
-            ((nl4 - jr) ** 2 * fact2) - 1.0,
+            (((nl4 - jr) ** 2) * fact2) - 1.0,
             (2 * nside - jr) * (2 * nside * fact2)
         )
     )
 
-    tmp = jnp.where(jr < nside, jr * jr * fact2, (nl4 - jr) ** 2 * fact2)
+    tmp = jnp.where(jr < nside, jr * jr * fact2, ((nl4 - jr) ** 2) * fact2)
     valid_tmp = tmp * (2.0 - tmp)
-    s = jnp.where(valid_tmp > 0.0, jnp.sqrt(valid_tmp), -5.0)
+    s = jnp.where((z > 0.99) | (z < -0.99), jnp.sqrt(valid_tmp), -5.0)
 
     nr = jnp.where((jr < nside) | (jr > 3 * nside),
                    jnp.where(jr < nside, jr, nl4 - jr),

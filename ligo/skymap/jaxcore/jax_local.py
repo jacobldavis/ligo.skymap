@@ -133,7 +133,6 @@ def bayestar_pixels_sort_prob(pixels):
         order = uniq2order64(uniq)
         return logp - 2 * M_LN2 * order
 
-    length = pixels.shape[0] 
     scores = vmap(compute_score)(pixels)
     sorted_indices = jnp.argsort(scores)
     sorted_pixels = pixels[sorted_indices]

@@ -150,8 +150,8 @@ def compute_F(responses, horizons, phi, theta, gmst):
     nifos = responses.shape[0]
 
     def body(i):
-        val = antenna_factor(lax.dynamic_slice(responses, (i, 0, 0), (1, responses.shape[1], responses.shape[2])), phi, M_PI_2 - theta, gmst) * lax.dynamic_slice(horizons, (i,), (1,)) 
-        return val[0]
+        val = antenna_factor(responses[i], phi, M_PI_2 - theta, gmst) * horizons[i]
+        return val
 
     return vmap(lambda i: body(i))(jnp.arange(nifos))
 
@@ -161,6 +161,7 @@ def catrom(x0, x1, x2, x3, t):
 
 @jit 
 def exp_i(phi):
+    phi = jnp.float32(phi)
     return jnp.cos(phi) + 1j * jnp.sin(phi)
 
 @jit 
@@ -183,12 +184,19 @@ def eval_snr(x, nsamples, t):
         Interpolated SNR value, or 0 outside valid range.
     """
     i = jnp.floor(t).astype(jnp.int32)
-    f = t - i
-    return jnp.where(jnp.logical_and(i >= 1, i < nsamples - 2), catrom(x[i-1][0], x[i][0], x[i+1][0], x[i+2][0], f) * exp_i(
-            catrom(x[i-1][1], x[i][1], x[i+1][1], x[i+2][1], f)), 0)
+    f = jnp.float32(t - jnp.floor(t))
+    cond = jnp.logical_and(i >= 1, i < nsamples - 2)
+
+    mag = catrom(
+        x[i - 1][0], x[i][0], x[i + 1][0], x[i + 2][0], f)
+    phase = catrom(
+        x[i - 1][1], x[i][1], x[i + 1][1], x[i + 2][1], f)
+
+    val = mag * exp_i(phase)
+    return jnp.where(cond, val, jnp.complex64(0.0 + 0.0j))
 
 @jit
-def toa_errors(theta, phi, gmst, nifos, locs, toas):
+def toa_errors(theta, phi, gmst, locs, toas):
     """
     Compute time-of-arrival errors for a given sky location.
 
@@ -409,7 +417,7 @@ def bsm_pixel_jax(integrators, flag, i, iifo, pixels, gmst, nifos, nsamples, sam
     F = compute_F(responses, horizons, phi, theta, gmst)
 
     # Compute dt
-    dt = toa_errors(theta, phi, gmst, nifos, locations, epochs)
+    dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
     @jit

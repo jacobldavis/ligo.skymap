@@ -101,7 +101,7 @@ class cubic_interp:
             jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
             jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
             jnp.where(bad12, 0.0, jnp.where(bad03, z[2]-z[1], a2)),
-            jnp.where(bad12, z[1], a3)
+            jnp.where(bad12, z[1], jnp.where(bad03, z[1], a3))
         ])
 
     @staticmethod
@@ -288,7 +288,7 @@ class bicubic_interp:
 
             return jnp.where(is_nan, x[0] + x[1], result)
 
-        return jnp.where(jnp.any(jnp.isnan(s)) | jnp.any(jnp.isnan(t)), s + t, eval_point(x))
+        return eval_point(x)
 
 # --- TEST SUITE ---
 
