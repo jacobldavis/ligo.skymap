@@ -206,7 +206,7 @@ def compute_coeffs(data, ns, nt):
         return vmap(get_zt)(ARANGE4)
 
     def compute_block(iss, itt):
-        a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(jnp.arange(4))
+        a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(ARANGE4)
         return vmap(interpolate_1d)(a_rows.T)
 
     blocks = vmap(lambda iss: vmap(lambda itt: compute_block(iss, itt))(jnp.arange(length_t)))(jnp.arange(length_s))
@@ -238,9 +238,9 @@ class bicubic_interp:
         Precomputed bicubic coefficient tensor.
     """
     def __init__(self, data, ns, nt, smin, tmin, ds, dt):
-        self.fx = jnp.array([jnp.float32(1/ds), jnp.float32(1/dt)])
-        self.x0 = jnp.array([jnp.float32(3 - self.fx[0] * smin), jnp.float32(3 - self.fx[1] * tmin)])
-        self.xlength = jnp.array([jnp.int32(ns + 6), jnp.int32(nt + 6)])
+        self.fx = jnp.array([1/ds, 1/dt])
+        self.x0 = jnp.array([3 - self.fx[0] * smin, 3 - self.fx[1] * tmin])
+        self.xlength = jnp.array([ns + 6, nt + 6])
         self.a = compute_coeffs(data,ns,nt)
 
     @staticmethod

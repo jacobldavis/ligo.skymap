@@ -54,7 +54,7 @@ from ..util.numpy import require_contiguous_aligned
 from ..util.stopwatch import Stopwatch
 from .ez_emcee import ez_emcee
 
-from ..jaxcore.jax_local import bsm_jax
+from ..jaxcore.jax_local import bsm_jax, bsm_jax_batched
 
 __all__ = ('derasterize', 'localize', 'rasterize', 'antenna_factor',
            'signal_amplitude_model')
