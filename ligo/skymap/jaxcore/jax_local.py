@@ -412,24 +412,24 @@ def bsm_jax_batched(min_distance, max_distance, prior_distance_power,
     log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - log_radial_integrator.log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], (integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax), 0, 0, -jnp.inf, -jnp.inf)
     accum = jnp.zeros((npix0, nifos))
 
-    def update_pixel_row(i, flag, iifo, px):
-        _, new_row = bsm_pixel_row_jax(integrators_values, flag, i, iifo, px,
-                                       gmst, nifos, nsamples, sample_rate,
-                                       epochs, snrs, responses, locations, horizons,
-                                       rescale_loglikelihood)
-        return new_row
+    def update_pixel_row(px_row, flag, iifo):
+        return bsm_pixel_row_jax(
+            integrators_values, flag, px_row[0], iifo, px_row,
+            gmst, nifos, nsamples, sample_rate,
+            epochs, snrs, responses, locations, horizons,
+            rescale_loglikelihood
+        )
 
     def run_all_vmap(pixels, accum):
-        indices = jnp.arange(npix0)
-
-        pixels_new_rows = lax.map(lambda i: update_pixel_row(i, 1, 0, pixels), indices, batch_size=bs)
-        pixels = pixels.at[indices].set(pixels_new_rows)
+        pixels_new_rows = lax.map(lambda px_row: update_pixel_row(px_row, 1, 0), pixels, batch_size=bs)
+        pixels = pixels.at[:].set(pixels_new_rows)
 
         def update_incoherent(iifo):
-            return lax.map(lambda i: update_pixel_row(i, 2, iifo, accum), indices, batch_size=bs)
+            return lax.map(lambda acc_row: update_pixel_row(acc_row, 2, iifo), accum, batch_size=bs)
 
         accum_rows = vmap(update_incoherent)(jnp.arange(nifos))
-        accum = jnp.stack(accum_rows, axis=1)
+        accum = jnp.moveaxis(accum_rows, 0, 1) 
+
         return pixels, accum
 
     pixels, accum = run_all_vmap(pixels, accum)
@@ -440,13 +440,12 @@ def bsm_jax_batched(min_distance, max_distance, prior_distance_power,
     pixels = bayestar_pixels_sort_prob(pixels)
 
     # Adaptively refine until order=11
-    @jit
     def refine_vmap(pixels):
         pixels, length = bayestar_pixels_refine(pixels, npix0 // 4)
-        indices = jnp.arange(pixels.shape[0]-npix0, pixels.shape[0])
 
-        pixels_new_rows = lax.map(lambda i: update_pixel_row(i, 1, 0, pixels), indices, batch_size=bs)
-        pixels = pixels.at[indices].set(pixels_new_rows)
+        new_rows = pixels[-(npix0):]
+        updated_rows = lax.map(lambda px_row: update_pixel_row(px_row, 1, 0), new_rows, batch_size=bs)
+        pixels = pixels.at[-(npix0):].set(updated_rows)
 
         pixels = bayestar_pixels_sort_prob(pixels)
         return pixels, length
@@ -460,16 +459,14 @@ def bsm_jax_batched(min_distance, max_distance, prior_distance_power,
     pixels, length = refine_vmap(pixels)
 
     # Evaluate distance layers
-    def compute_distance_row(i, px):
-        _, row = bsm_pixel_row_jax(integrators_values, 3, i, 0, px,
-                                   gmst, nifos, nsamples, sample_rate,
-                                   epochs, snrs, responses, locations, horizons,
-                                   rescale_loglikelihood)
-        return row
+    def compute_distance_row(px):
+        return bsm_pixel_row_jax(integrators_values, 3, px[0], 0, px,
+                                gmst, nifos, nsamples, sample_rate,
+                                epochs, snrs, responses, locations, horizons,
+                                rescale_loglikelihood)
 
-    indices = jnp.arange(pixels.shape[0])
-    distance_rows = lax.map(lambda i: compute_distance_row(i, pixels), indices, batch_size=24)
-    pixels = pixels.at[indices].set(distance_rows)
+    distance_rows = lax.map(compute_distance_row, pixels, batch_size=bs)
+    pixels = pixels.at[:].set(distance_rows)
 
     # --- DONE SECTION ---
 
@@ -485,7 +482,6 @@ def bsm_jax_batched(min_distance, max_distance, prior_distance_power,
     inv_norm = 1.0 / norm
 
     # Rescale, normalize, and prepare output
-    @jit
     def prepare_output(px):
         logp = px[1]
         prob = jnp.exp(logp) * inv_norm

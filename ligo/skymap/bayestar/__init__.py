@@ -399,11 +399,11 @@ def localize(
         # skymap, log_bci, log_bsn = core.toa_phoa_snr(*args)
         # end = time.perf_counter()
         # print(f"TIME: {end - start}")
-        compilea, compileb, compilec = bsm_jax(min_distance, max_distance, prior_distance_power,
+        compilea, compileb, compilec = bsm_jax_batched(min_distance, max_distance, prior_distance_power,
                                            cosmology, gmst, len(toas), snrs[0].shape[0], sample_rate,
                                            toas, snrs, responses, locations, horizons, rescale_loglikelihood)
         start = time.perf_counter()
-        skymap, log_bci, log_bsn = bsm_jax(min_distance, max_distance, prior_distance_power,
+        skymap, log_bci, log_bsn = bsm_jax_batched(min_distance, max_distance, prior_distance_power,
                                            cosmology, gmst, len(toas), snrs[0].shape[0], sample_rate,
                                            toas, snrs, responses, locations, horizons, rescale_loglikelihood)
         end = time.perf_counter()
