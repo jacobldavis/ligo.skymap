@@ -15,7 +15,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-import numpy as np
 from jax import jit, vmap, lax
 import jax
 import jax.numpy as jnp
@@ -419,13 +418,25 @@ def bsm_jax_batched(min_distance, max_distance, prior_distance_power,
             epochs, snrs, responses, locations, horizons,
             rescale_loglikelihood
         )
+    
+    def update_accum_row(px_row, iifo):
+        return bsm_pixel_row_jax(
+            integrators_values, 2, px_row[0], iifo, px_row,
+            gmst, nifos, nsamples, sample_rate,
+            lax.dynamic_slice(epochs, (iifo,), (1,)), 
+            lax.dynamic_slice(snrs, (iifo, 0, 0), (1, snrs.shape[1], snrs.shape[2])), 
+            lax.dynamic_slice(responses, (iifo, 0, 0), (1, responses.shape[1], responses.shape[2])),
+            lax.dynamic_slice(locations, (iifo, 0), (1, locations.shape[1])), 
+            lax.dynamic_slice(horizons, (iifo,), (1,)),
+            rescale_loglikelihood
+        )
 
     def run_all_vmap(pixels, accum):
         pixels_new_rows = lax.map(lambda px_row: update_pixel_row(px_row, 1, 0), pixels, batch_size=bs)
         pixels = pixels.at[:].set(pixels_new_rows)
 
         def update_incoherent(iifo):
-            return lax.map(lambda acc_row: update_pixel_row(acc_row, 2, iifo), accum, batch_size=bs)
+            return lax.map(lambda acc_row: update_accum_row(acc_row, iifo), accum, batch_size=bs)
 
         accum_rows = vmap(update_incoherent)(jnp.arange(nifos))
         accum = jnp.moveaxis(accum_rows, 0, 1) 

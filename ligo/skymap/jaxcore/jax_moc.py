@@ -308,6 +308,10 @@ def pix2ang_nest64(nside, ipix, ctab, jrll, jpll):
     theta = jnp.where(s < -2.0, jnp.acos(z_clamped), jnp.atan2(s, z_clamped))
     return theta, phi
 
+ctab = jnp.array(build_ctab())
+jrll = jnp.array([2,2,2,2,3,3,3,3,4,4,4,4])
+jpll = jnp.array([1,3,5,7,0,2,4,6,1,3,5,7])
+
 @jit
 def uniq2ang64(uniq):
     """Convert a UNIQ64 index to spherical (theta, phi) coordinates.
@@ -325,9 +329,6 @@ def uniq2ang64(uniq):
         phi : float
             Azimuthal angle in radians.
     """
-    ctab = jnp.array(build_ctab())
-    jrll = jnp.array([2,2,2,2,3,3,3,3,4,4,4,4])
-    jpll = jnp.array([1,3,5,7,0,2,4,6,1,3,5,7])
     order, nest = uniq2nest64(uniq)
     valid = order >= 0
     nside = 2 ** order

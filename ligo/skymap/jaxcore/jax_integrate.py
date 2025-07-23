@@ -15,12 +15,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-import numpy as np
 import math
 from numpy.polynomial.legendre import leggauss
 from jax import jit, vmap, lax
 from jax.scipy.special import i0e
-import jax
 import jax.numpy as jnp
 import time
 from functools import partial
@@ -387,7 +385,9 @@ class log_radial_integrator:
         x = log_p 
         y = jnp.log(2) + 2 * log_p - log_b
         result = jnp.pow(0.5 * b / p, 2)
-        result += jnp.where(y >= ymax, cubic_interp.cubic_interp_eval_jax(x,f1,t01,length1,a1),jnp.where((0.5 * (x + y)) <= vmax,cubic_interp.cubic_interp_eval_jax(0.5 * (x-y),f2,t02,length2,a2),bicubic_interp.bicubic_interp_eval_jax(x,y,fx,x0,xlength,a)))
+        result += jnp.where(y >= ymax, cubic_interp.cubic_interp_eval_jax(x,f1,t01,length1,a1),
+                            jnp.where((0.5 * (x + y)) <= vmax, cubic_interp.cubic_interp_eval_jax(0.5 * (x-y),f2,t02,length2,a2),
+                            bicubic_interp.bicubic_interp_eval_jax(x,y,fx,x0,xlength,a)))
 
         return jnp.where(p > 0, result, p0_limit)
 
