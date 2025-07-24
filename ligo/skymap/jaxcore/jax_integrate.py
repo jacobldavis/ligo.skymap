@@ -166,9 +166,11 @@ def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     -------
     float
         Log of the radial integrand.
+
+    NOTE: cosmology is temporarily disabled to increase runtimes
     """
     ret = jnp.log(i0e(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p/r - 0.5 * b/p, 2)
-    return jnp.where(cosmology, ret + log_dVC_dVL(r, x_knots, coeffs), ret)
+    return ret
 
 @jit
 def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
@@ -191,10 +193,12 @@ def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     -------
     float
         Value of the integrand at r.
+
+    NOTE: cosmology is temporarily disabled to improve runtimes
     """
     ret = scale - jnp.pow(p / r - 0.5 * b / p, 2)
     multiplier = i0e(b / r) * jnp.power(r, k)
-    return jnp.where(cosmology, jnp.exp(ret + log_dVC_dVL(r, x_knots, coeffs)) * multiplier, jnp.exp(ret) * multiplier)
+    return jnp.exp(ret) * multiplier
 
 @jit
 def compute_breakpoints(p, b, r1, r2):

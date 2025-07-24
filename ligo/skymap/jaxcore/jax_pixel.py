@@ -184,7 +184,6 @@ def toa_errors(theta, phi, gmst, locs, toas):
     dt = toas + dot             
     return dt
 
-
 @jit
 def catrom(x0, x1, x2, x3, t):
     return x1 + t*(-0.5*x0 + 0.5*x2 + t*(x0 - 2.5*x1 + 2.0*x2 - 0.5*x3 + t*(-0.5*x0 + 1.5*x1 - 1.5*x2 + 0.5*x3)))
@@ -372,20 +371,6 @@ def safe_eval(integrator_tuple, integrator_b, itwopsi, iu, isample, u_points_wei
         integrator_b, p[itwopsi][iu], b[itwopsi][iu][isample],
         log_p[itwopsi][iu], log_b[itwopsi][iu][isample])
     return jnp.where(jnp.isfinite(val), val, u_points_weights[iu][1])
-
-def batched_safe_eval(integrator_region, integrator_b, u_points_weights, p, b, log_p, log_b):
-    def inner(itwopsi, iu, isample):
-        return safe_eval(integrator_region, integrator_b, itwopsi, iu, isample,
-                         u_points_weights, p, b, log_p, log_b)
-    return vmap(  
-        lambda itwopsi: vmap(  
-            lambda iu: vmap(  
-                lambda isample: inner(itwopsi, iu, isample)
-            )(jnp.arange(b.shape[2]))
-        )(jnp.arange(b.shape[1]))  
-    )(jnp.arange(b.shape[0]))  
-
-jit_batched_safe_eval = jit(batched_safe_eval)
 
 @jit
 def bsm_pixel_jax(integrators, flag, i, iifo, pixels, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
@@ -578,14 +563,23 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
 
     # Initialize accum with the integrator evaluation
     accum0 = jnp.where(flag != 3, 
-                    jit_batched_safe_eval(integrators[0][0], integrators[1][0],
-                                  u_points_weights, p, b, log_p, log_b), jnp.array([0]))
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
     accum1 = jnp.where(flag == 3, 
-                    jit_batched_safe_eval(integrators[0][1], integrators[1][1],
-                                  u_points_weights, p, b, log_p, log_b), jnp.array([0]))
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
     accum2 = jnp.where(flag == 3, 
-                    jit_batched_safe_eval(integrators[0][2], integrators[1][2],
-                                  u_points_weights, p, b, log_p, log_b), jnp.array([0]))
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
     accum = jnp.array([accum0, accum1, accum2])
 
     # Return updated pixel row
