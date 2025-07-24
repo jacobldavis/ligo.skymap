@@ -420,7 +420,7 @@ def bsm_jax_batched(min_distance, max_distance, prior_distance_power,
         )
     
     def update_accum_row(px_row, iifo):
-        return bsm_pixel_row_jax(
+        return bsm_pixel_row_jax_scalar(
             integrators_values, 2, px_row[0], iifo, px_row,
             gmst, nifos, nsamples, sample_rate,
             lax.dynamic_slice(epochs, (iifo,), (1,)), 
@@ -435,11 +435,10 @@ def bsm_jax_batched(min_distance, max_distance, prior_distance_power,
         pixels_new_rows = lax.map(lambda px_row: update_pixel_row(px_row, 1, 0), pixels, batch_size=bs)
         pixels = pixels.at[:].set(pixels_new_rows)
 
-        def update_incoherent(iifo):
-            return lax.map(lambda acc_row: update_accum_row(acc_row, iifo), accum, batch_size=bs)
+        def update_incoherent(acc_row):
+            return vmap(lambda iifo: update_accum_row(acc_row, iifo))(jnp.arange(nifos))
 
-        accum_rows = vmap(update_incoherent)(jnp.arange(nifos))
-        accum = jnp.moveaxis(accum_rows, 0, 1) 
+        accum = lax.map(update_incoherent, accum, batch_size=bs)
 
         return pixels, accum
 

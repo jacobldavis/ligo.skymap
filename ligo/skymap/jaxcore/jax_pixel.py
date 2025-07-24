@@ -558,7 +558,7 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
     # Shift SNR time series by the time delay for this sky position
     snrs_interp = vmap(lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
 
-    # Perform bayestar_singal_amplitude_model
+    # Perform bayestar_signal_amplitude_model
     p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
@@ -603,6 +603,92 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
     )
 
     return updated_row
+
+@jit
+def bsm_pixel_row_jax_scalar(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+    """
+    Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
+
+    Parameters
+    ----------
+    integrators : list
+        Tupled radial integrators (region functions and limits).
+    flag : int
+        Controls where results are stored (see below).
+    uniq : int
+        Uniq id of the pixel in the array.
+    iifo : int
+        Detector index.
+    px : array_like
+        Pixel row to modify.
+    gmst : float
+        Greenwich Mean Sidereal Time.
+    nifos : int
+        Number of interferometers.
+    nsamples : int
+        Number of SNR time samples.
+    sample_rate : float
+        Sampling rate in Hz.
+    epochs : array_like
+        Arrival time offsets per detector.
+    snrs : array_like
+        Complex-valued SNR time series.
+    responses : array_like
+        Detector tensor responses.
+    locations : array_like
+        Detector locations.
+    horizons : array_like
+        Horizon distances.
+    rescale_loglikelihood : float
+        Factor for log-likelihood normalization.
+
+    Returns
+    -------
+    Scalar value for accum calculation
+
+    """
+    # Initialize starting values
+    theta, phi = uniq2ang64(uniq)
+
+    # Look up antenna factors
+    F = compute_F(responses, horizons, phi, theta, gmst)
+
+    # Compute dt
+    dt = toa_errors(theta, phi, gmst, locations, epochs)
+
+    # Shift SNR time series by the time delay for this sky position
+    snrs_interp = vmap(lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+
+    # Perform bayestar_signal_amplitude_model
+    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
+
+    # Initialize accum with the integrator evaluation
+    accum0 = jnp.where(flag != 3, 
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
+    accum1 = jnp.where(flag == 3, 
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
+    accum2 = jnp.where(flag == 3, 
+                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
+                    jnp.array([0]))
+    accum = jnp.array([accum0, accum1, accum2])
+
+    # Return updated accum value
+    return lax.cond(flag == 2,
+        lambda _: compute_accum(0, accum),
+        lambda _: px[iifo],
+        operand=None
+    )
 
 # --- TEST SUITE ---
 
