@@ -74,11 +74,7 @@ def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
     new_pixels = lax.dynamic_update_slice(new_pixels, pixels_prefix, (0, 0))
 
     def refine_loop(i, new_pixels):
-        parent_idx = length - i - 1
-        parent_pixel = pixels[parent_idx]
-        parent_uniq = parent_pixel[0]
-
-        base_uniq = 4 * parent_uniq
+        base_uniq = 4 * pixels[length - i - 1, 0]
         child_uniqs = jnp.arange(4, dtype=pixels.dtype) + base_uniq
         child_aux = jnp.zeros((4, 3), dtype=pixels.dtype)
         new_children = jnp.concatenate([child_uniqs[:, None], child_aux], axis=1)
