@@ -459,10 +459,6 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
         lambda row: row.at[1].set(compute_accum(0, accum)),
         lambda row: row, updated_row
     )
-    updated_row = lax.cond(flag == 2,
-        lambda row: row.at[iifo].set(compute_accum(0, accum)),
-        lambda row: row, updated_row
-    )
     updated_row = lax.cond(flag == 3,
         lambda row: row.at[2].set(compute_accum(1, accum)),
         lambda row: row, updated_row
@@ -556,7 +552,7 @@ def bsm_pixel_row_jax_scalar(integrators, flag, uniq, iifo, px, gmst, nifos, nsa
     # Return updated accum value
     return lax.cond(flag == 2,
         lambda _: compute_accum(0, accum),
-        lambda _: px[iifo],
+        lambda _: px[0],
         operand=None
     )
 

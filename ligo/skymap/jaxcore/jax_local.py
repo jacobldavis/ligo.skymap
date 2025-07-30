@@ -249,10 +249,10 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         pixels_new_rows = lax.map(lambda px_row: update_pixel_row(px_row, 1, 0), pixels, batch_size=bs)
         pixels = pixels.at[:].set(pixels_new_rows)
 
-        def update_incoherent(acc_row):
-            return vmap(lambda iifo: update_accum_row(acc_row, iifo))(jnp.arange(nifos))
+        def update_incoherent(px_row):
+            return vmap(lambda iifo: update_accum_row(px_row, iifo))(jnp.arange(nifos))
 
-        accum = lax.map(update_incoherent, accum, batch_size=bs)
+        accum = lax.map(update_incoherent, pixels, batch_size=bs)
 
         return pixels, accum
 
@@ -324,6 +324,5 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     log_bci = log_bsn = log_evidence_coherent
     log_bci -= jnp.sum(vmap(lambda i: log_evidence_incoherent[i])(jnp.arange(nifos)))
 
-    #TODO: verify log_bci and log_bsn output
     return pixels, log_bci, log_bsn
 
