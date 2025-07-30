@@ -76,7 +76,7 @@ class cubic_interp:
         Returns
         -------
         coeffs : jax.numpy.ndarray
-            Array of cubic coefficients, shape (n+6, 4).
+            Array of cubic coefficients, shape (4).
         """
         # Clip indices and build z
         z = jnp.array([
