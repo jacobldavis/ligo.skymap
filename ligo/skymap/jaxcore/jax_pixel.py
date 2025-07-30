@@ -373,7 +373,7 @@ def safe_eval(integrator_tuple, integrator_b, itwopsi, iu, isample, u_points_wei
     return jnp.where(jnp.isfinite(val), val, u_points_weights[iu][1])
 
 @jit
-def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_row_jax(integrators, flag, uniq, px, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     """
     Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
 
@@ -385,14 +385,10 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
         Controls where results are stored (see below).
     uniq : int
         Uniq id of the pixel in the array.
-    iifo : int
-        Detector index.
     px : array_like
         Pixel row to modify.
     gmst : float
         Greenwich Mean Sidereal Time.
-    nifos : int
-        Number of interferometers.
     nsamples : int
         Number of SNR time samples.
     sample_rate : float
@@ -432,19 +428,19 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
     p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = jnp.where(flag != 3, 
+    accum0 = jnp.where(flag != 2, 
                     vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                         safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample,
                                   u_points_weights, p, b, log_p, log_b))
                     (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
                     jnp.array([0]))
-    accum1 = jnp.where(flag == 3, 
+    accum1 = jnp.where(flag == 2, 
                     vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                         safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample,
                                   u_points_weights, p, b, log_p, log_b))
                     (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
                     jnp.array([0]))
-    accum2 = jnp.where(flag == 3, 
+    accum2 = jnp.where(flag == 2, 
                     vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                         safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample,
                                   u_points_weights, p, b, log_p, log_b))
@@ -459,11 +455,11 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
         lambda row: row.at[1].set(compute_accum(0, accum)),
         lambda row: row, updated_row
     )
-    updated_row = lax.cond(flag == 3,
+    updated_row = lax.cond(flag == 2,
         lambda row: row.at[2].set(compute_accum(1, accum)),
         lambda row: row, updated_row
     )
-    updated_row = lax.cond(flag == 3,
+    updated_row = lax.cond(flag == 2,
         lambda row: row.at[3].set(compute_accum(2, accum)),
         lambda row: row, updated_row
     )
@@ -471,7 +467,7 @@ def bsm_pixel_row_jax(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, 
     return updated_row
 
 @jit
-def bsm_pixel_row_jax_scalar(integrators, flag, uniq, iifo, px, gmst, nifos, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_row_jax_scalar(integrators, uniq, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     """
     Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
 
@@ -529,32 +525,14 @@ def bsm_pixel_row_jax_scalar(integrators, flag, uniq, iifo, px, gmst, nifos, nsa
     p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = jnp.where(flag != 3, 
-                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+    accum0 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                         safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample,
                                   u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
-                    jnp.array([0]))
-    accum1 = jnp.where(flag == 3, 
-                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
-                    jnp.array([0]))
-    accum2 = jnp.where(flag == 3, 
-                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
-                    jnp.array([0]))
-    accum = jnp.array([accum0, accum1, accum2])
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum = jnp.array([accum0])
 
     # Return updated accum value
-    return lax.cond(flag == 2,
-        lambda _: compute_accum(0, accum),
-        lambda _: px[0],
-        operand=None
-    )
+    return compute_accum(0, accum)
 
 # --- TEST SUITE ---
 

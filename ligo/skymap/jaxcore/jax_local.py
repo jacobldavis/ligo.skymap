@@ -225,18 +225,18 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - log_radial_integrator.log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], (integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax), 0, 0, -jnp.inf, -jnp.inf)
     accum = jnp.zeros((npix0, nifos))
 
-    def update_pixel_row(px_row, flag, iifo):
+    def update_pixel_row(px_row):
         return bsm_pixel_row_jax(
-            integrators_values, flag, px_row[0], iifo, px_row,
-            gmst, nifos, nsamples, sample_rate,
+            integrators_values, 1, px_row[0], px_row,
+            gmst, nsamples, sample_rate,
             epochs, snrs, responses, locations, horizons,
             rescale_loglikelihood
         )
     
     def update_accum_row(px_row, iifo):
         return bsm_pixel_row_jax_scalar(
-            integrators_values, 2, px_row[0], iifo, px_row,
-            gmst, nifos, nsamples, sample_rate,
+            integrators_values, px_row[0],
+            gmst, nsamples, sample_rate,
             lax.dynamic_slice(epochs, (iifo,), (1,)), 
             lax.dynamic_slice(snrs, (iifo, 0, 0), (1, snrs.shape[1], snrs.shape[2])), 
             lax.dynamic_slice(responses, (iifo, 0, 0), (1, responses.shape[1], responses.shape[2])),
@@ -246,7 +246,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         )
 
     def run_all_vmap(pixels, accum):
-        pixels_new_rows = lax.map(lambda px_row: update_pixel_row(px_row, 1, 0), pixels, batch_size=bs)
+        pixels_new_rows = lax.map(lambda px_row: update_pixel_row(px_row), pixels, batch_size=bs)
         pixels = pixels.at[:].set(pixels_new_rows)
 
         def update_incoherent(px_row):
@@ -268,7 +268,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         pixels, length = bayestar_pixels_refine(pixels, npix0 // 4)
 
         new_rows = pixels[-(npix0):]
-        updated_rows = lax.map(lambda px_row: update_pixel_row(px_row, 1, 0), new_rows, batch_size=bs)
+        updated_rows = lax.map(lambda px_row: update_pixel_row(px_row), new_rows, batch_size=bs)
         pixels = pixels.at[-(npix0):].set(updated_rows)
 
         pixels = bayestar_pixels_sort_prob(pixels)
@@ -283,13 +283,13 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     pixels, length = refine_vmap(pixels)
 
     # Evaluate distance layers
-    def compute_distance_row(px):
-        return bsm_pixel_row_jax(integrators_values, 3, px[0], 0, px,
-                                gmst, nifos, nsamples, sample_rate,
+    def update_distance_row(px):
+        return bsm_pixel_row_jax(integrators_values, 2, px[0], px,
+                                gmst, nsamples, sample_rate,
                                 epochs, snrs, responses, locations, horizons,
                                 rescale_loglikelihood)
 
-    distance_rows = lax.map(compute_distance_row, pixels, batch_size=bs)
+    distance_rows = lax.map(update_distance_row, pixels, batch_size=bs)
     pixels = pixels.at[:].set(distance_rows)
 
     # --- DONE SECTION ---
