@@ -16,7 +16,6 @@
 #
 
 from jax import jit, vmap, lax
-import jax
 import jax.numpy as jnp
 from .jax_cosmology import *
 from .jax_moc import *
@@ -199,7 +198,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         Pixel array with posterior, mean, std distance + log Bayes factors.
 
     NOTE: We use jax.lax.fori_loop and jax.lax.map to avoid overallocating memory in some cases.
-          Tune the bs parameter (batch_size) depending on your GPU's memory.
+          Tune the bs parameter (batch_size) or swap lax.map to vmap depending on your GPU's memory.
     """
     # Initialize integrators
     pmax = jnp.sqrt(0.5 * jnp.sum(jnp.square(horizons))) * rescale_loglikelihood
@@ -222,19 +221,22 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
     ]))(jnp.arange(npix0))
 
     # Compute the coherent probability map and incoherent evidence at the lowest order
-    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) - log_radial_integrator.log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], (integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax), 0, 0, -jnp.inf, -jnp.inf)
+    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples) \
+               - log_radial_integrator.log_radial_integrator_eval(regions[0][0], regions[0][1], regions[0][2], 
+                                                                  (integrators[0].p0_limit, integrators[0].vmax, integrators[0].ymax), 
+                                                                  0, 0, -jnp.inf, -jnp.inf)
     accum = jnp.zeros((npix0, nifos))
 
     def update_pixel_row(px_row):
-        return bsm_pixel_row_jax(
-            integrators_values, 1, px_row[0], px_row,
+        return bsm_pixel_prob_jax(
+            integrators_values, px_row[0], px_row,
             gmst, nsamples, sample_rate,
             epochs, snrs, responses, locations, horizons,
             rescale_loglikelihood
         )
     
     def update_accum_row(px_row, iifo):
-        return bsm_pixel_row_jax_scalar(
+        return bsm_pixel_accum_jax(
             integrators_values, px_row[0],
             gmst, nsamples, sample_rate,
             lax.dynamic_slice(epochs, (iifo,), (1,)), 
@@ -284,7 +286,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Evaluate distance layers
     def update_distance_row(px):
-        return bsm_pixel_row_jax(integrators_values, 2, px[0], px,
+        return bsm_pixel_dist_jax(integrators_values, px[0], px,
                                 gmst, nsamples, sample_rate,
                                 epochs, snrs, responses, locations, horizons,
                                 rescale_loglikelihood)

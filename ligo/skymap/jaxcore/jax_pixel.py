@@ -373,7 +373,7 @@ def safe_eval(integrator_tuple, integrator_b, itwopsi, iu, isample, u_points_wei
     return jnp.where(jnp.isfinite(val), val, u_points_weights[iu][1])
 
 @jit
-def bsm_pixel_row_jax(integrators, flag, uniq, px, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_prob_jax(integrators, uniq, px, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     """
     Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
 
@@ -409,7 +409,7 @@ def bsm_pixel_row_jax(integrators, flag, uniq, px, gmst, nsamples, sample_rate, 
     Returns
     -------
     array_like
-        Modified pixels row based on the input flag.
+        Pixels row with updated probability.
 
     """
     # Initialize starting values
@@ -428,46 +428,88 @@ def bsm_pixel_row_jax(integrators, flag, uniq, px, gmst, nsamples, sample_rate, 
     p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = jnp.where(flag != 2, 
-                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+    accum0 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
                         safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample,
                                   u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
-                    jnp.array([0]))
-    accum1 = jnp.where(flag == 2, 
-                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
-                    jnp.array([0]))
-    accum2 = jnp.where(flag == 2, 
-                    vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi)), 
-                    jnp.array([0]))
-    accum = jnp.array([accum0, accum1, accum2])
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum = jnp.array([accum0])
 
     # Return updated pixel row
-    updated_row = px
-
-    updated_row = lax.cond(flag == 1,
-        lambda row: row.at[1].set(compute_accum(0, accum)),
-        lambda row: row, updated_row
-    )
-    updated_row = lax.cond(flag == 2,
-        lambda row: row.at[2].set(compute_accum(1, accum)),
-        lambda row: row, updated_row
-    )
-    updated_row = lax.cond(flag == 2,
-        lambda row: row.at[3].set(compute_accum(2, accum)),
-        lambda row: row, updated_row
-    )
-
-    return updated_row
+    return px.at[1].set(compute_accum(0, accum))
 
 @jit
-def bsm_pixel_row_jax_scalar(integrators, uniq, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+    """
+    Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
+
+    Parameters
+    ----------
+    integrators : list
+        Tupled radial integrators (region functions and limits).
+    flag : int
+        Controls where results are stored (see below).
+    uniq : int
+        Uniq id of the pixel in the array.
+    px : array_like
+        Pixel row to modify.
+    gmst : float
+        Greenwich Mean Sidereal Time.
+    nsamples : int
+        Number of SNR time samples.
+    sample_rate : float
+        Sampling rate in Hz.
+    epochs : array_like
+        Arrival time offsets per detector.
+    snrs : array_like
+        Complex-valued SNR time series.
+    responses : array_like
+        Detector tensor responses.
+    locations : array_like
+        Detector locations.
+    horizons : array_like
+        Horizon distances.
+    rescale_loglikelihood : float
+        Factor for log-likelihood normalization.
+
+    Returns
+    -------
+    array_like
+        Pixels row with updated distances.
+
+    """
+    # Initialize starting values
+    theta, phi = uniq2ang64(uniq)
+
+    # Look up antenna factors
+    F = compute_F(responses, horizons, phi, theta, gmst)
+
+    # Compute dt
+    dt = toa_errors(theta, phi, gmst, locations, epochs)
+
+    # Shift SNR time series by the time delay for this sky position
+    snrs_interp = vmap(lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+
+    # Perform bayestar_signal_amplitude_model
+    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
+
+    # Initialize accum with the integrator evaluation
+    accum1 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum2 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
+                        safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample,
+                                  u_points_weights, p, b, log_p, log_b))
+                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum = jnp.array([accum1, accum2])
+
+    # Return updated pixel row
+    px = px.at[2].set(compute_accum(0, accum))
+    px = px.at[3].set(compute_accum(1, accum))
+    return px
+
+@jit
+def bsm_pixel_accum_jax(integrators, uniq, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
     """
     Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
 
