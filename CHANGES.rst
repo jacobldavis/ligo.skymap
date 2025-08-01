@@ -5,7 +5,7 @@ Changelog
 2.4.1 (unreleased)
 ==================
 
-- No changes yet.
+- Require scipy >= 1.10.1.
 
 2.4.0 (2025-05-22)
 ==================
