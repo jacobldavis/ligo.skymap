@@ -18,7 +18,7 @@
 # Constant values from bayestar_skymap.h
 import jax.numpy as jnp
 
-dVC_dVL_data= jnp.array([
+dVC_dVL_data = jnp.array([
 	-9.03530686e-04,
 	-1.41061209e-03,
 	-2.20206980e-03,
