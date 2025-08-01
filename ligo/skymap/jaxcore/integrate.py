@@ -15,20 +15,18 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-import math
-from numpy.polynomial.legendre import leggauss
+from quadax import quadgk  # type: ignore
 from jax import jit, vmap, lax
 from jax.scipy.special import i0e
 import jax.numpy as jnp
-import time
-from functools import partial
-from ligo.skymap.jaxcore.jax_interp import *
-from ligo.skymap.jaxcore.jax_cosmology import *
-from quadax import quadgk # type: ignore
+from ligo.skymap.jaxcore.interp import cubic_interp, bicubic_interp, SQRT_2
+from ligo.skymap.jaxcore.cosmology import dVC_dVL_data, dVC_dVL_tmin, \
+    dVC_dVL_dt, dVC_dVL_high_z_intercept, \
+    dVC_dVL_high_z_slope, dVC_dVL_tmax
 
 # --- COSMOLOGY ---
 
-# gsl_spline_init
+
 @jit
 def compute_natural_cubic_spline_coeffs(x, y):
     """Compute natural cubic spline coefficients for 1D data.
@@ -52,12 +50,12 @@ def compute_natural_cubic_spline_coeffs(x, y):
     alpha = 3 * (y[2:] - y[1:-1]) / h[1:] - 3 * (y[1:-1] - y[:-2]) / h[:-1]
 
     # Tridiagonal matrix system
-    l = jnp.ones(n)
+    li = jnp.ones(n)
     mu = jnp.zeros(n)
     z = jnp.zeros(n)
-    l = l.at[1:-1].set(2 * (x[2:] - x[:-2]) - h[:-1] * mu[1:-1])
-    mu = mu.at[1:-1].set(h[1:] / l[1:-1])
-    z = z.at[1:-1].set((alpha - h[:-1] * z[:-2]) / l[1:-1])
+    li = li.at[1:-1].set(2 * (x[2:] - x[:-2]) - h[:-1] * mu[1:-1])
+    mu = mu.at[1:-1].set(h[1:] / li[1:-1])
+    z = z.at[1:-1].set((alpha - h[:-1] * z[:-2]) / li[1:-1])
 
     # Back substitution
     c = jnp.zeros(n)
@@ -66,13 +64,14 @@ def compute_natural_cubic_spline_coeffs(x, y):
 
     for j in range(n - 2, -1, -1):
         c = c.at[j].set(z[j] - mu[j] * c[j + 1])
-        b = b.at[j].set((y[j + 1] - y[j]) / h[j] - h[j] * (c[j + 1] + 2 * c[j]) / 3)
+        b = b.at[j].set((y[j + 1] - y[j]) / h[j] - h[j]
+                        * (c[j + 1] + 2 * c[j]) / 3)
         d = d.at[j].set((c[j + 1] - c[j]) / (3 * h[j]))
 
     a = y[:-1]
-    return x, a, b, c[:-1], d  
+    return x, a, b, c[:-1], d
 
-# gsl_spline_eval
+
 @jit
 def evaluate_cubic_spline(x_knots, coeffs, x_eval):
     """Evaluate cubic spline at a set of points.
@@ -91,25 +90,28 @@ def evaluate_cubic_spline(x_knots, coeffs, x_eval):
     y_eval : array_like
         Interpolated values at x_eval.
     """
-    a, b, c, d = coeffs 
+    a, b, c, d = coeffs
+
     def eval_one(x_val):
-        i = jnp.clip(jnp.searchsorted(x_knots, x_val) - 1, 0, x_knots.shape[0] - 2)
+        i = jnp.clip(jnp.searchsorted(x_knots, x_val) -
+                     1, 0, x_knots.shape[0] - 2)
         dx = x_val - x_knots[i]
         return (dx * (dx * (dx * d[i] + c[i]) + b[i]) + a[i])
 
     return vmap(eval_one)(x_eval)
 
-# dVC_dVL_init
+
 @jit
 def init_log_dVC_dVL_spline():
     len_data = dVC_dVL_data.shape[0]
     x = dVC_dVL_tmin + dVC_dVL_dt * jnp.arange(len_data)
     return compute_natural_cubic_spline_coeffs(x, dVC_dVL_data)
 
+
 x_knots, a_s, b_s, c_s, d_s = init_log_dVC_dVL_spline()
 coeffs = (a_s, b_s, c_s, d_s)
 
-# log_dVC_dVL
+
 @jit
 def log_dVC_dVL(DL, x_knots, coeffs):
     """Evaluate log(dVC/dVL) given luminosity distance.
@@ -129,7 +131,7 @@ def log_dVC_dVL(DL, x_knots, coeffs):
         log(dVC/dVL) evaluated at log(DL).
     """
     log_DL = jnp.log(DL)
-    
+
     spline_val = evaluate_cubic_spline(x_knots, coeffs, jnp.array([log_DL]))[0]
     linear_val = dVC_dVL_high_z_slope * log_DL + dVC_dVL_high_z_intercept
 
@@ -143,7 +145,8 @@ def log_dVC_dVL(DL, x_knots, coeffs):
 
 # --- INTEGRATOR ---
 
-@jit 
+
+@jit
 def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     """Logarithmic version of radial integrand.
 
@@ -172,6 +175,7 @@ def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     ret = jnp.log(i0e(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p/r - 0.5 * b/p, 2)
     return ret
 
+
 @jit
 def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     """Radial integrand used for numerical integration.
@@ -199,6 +203,7 @@ def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     ret = scale - jnp.pow(p / r - 0.5 * b / p, 2)
     multiplier = i0e(b / r) * jnp.power(r, k)
     return jnp.exp(ret) * multiplier
+
 
 @jit
 def compute_breakpoints(p, b, r1, r2):
@@ -260,7 +265,8 @@ def compute_breakpoints(p, b, r1, r2):
         operand=(breakpoints, n)
     )
 
-    return breakpoints, nbreakpoints                
+    return breakpoints, nbreakpoints
+
 
 @jit
 def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
@@ -288,12 +294,13 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     """
     # Compute p and b
     x = xmin + ix * d
-    y = ymin + iy * d 
+    y = ymin + iy * d
     p = jnp.exp(x)
     b = 2 * (jnp.pow(p, 2)) / jnp.exp(y)
 
     # Determine breakpoints and log_offset
     breakpoints, nbreakpoints = compute_breakpoints(p, b, r1, r2)
+
     def log_integrand(r):
         return log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs)
 
@@ -303,15 +310,17 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     log_offset = jnp.where(log_offset == -jnp.inf, 0.0, log_offset)
 
     def integrand(r):
-        return radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, -log_offset)
+        return radial_integrand(r, p, b, k, cosmology, x_knots, coeffs,
+                                -log_offset)
 
     # Adaptive quadrature
-    result, _ = quadgk(integrand, [r1,r2], epsrel=1e-8)
+    result, _ = quadgk(integrand, [r1, r2], epsrel=1e-8)
 
     return jnp.log(result) + log_offset
 
+
 class log_radial_integrator:
-    """Adaptive log-domain radial integral evaluator using cubic/bicubic interpolation.
+    """Adaptive log-domain radial integral evaluator using interpolation.
 
     Parameters
     ----------
@@ -333,6 +342,7 @@ class log_radial_integrator:
     region1, region2 : cubic_interp
         1D interpolation over boundaries of region0.
     """
+
     def __init__(self, r1, r2, k, cosmology, pmax, size):
         # Initialize constant values
         alpha = 4
@@ -348,10 +358,14 @@ class log_radial_integrator:
         k1 = k + 1
         r2 = jnp.where(1e-12 > r2, 1e-12, r2)
         r1 = jnp.where(1e-12 > r1, 1e-12, r1)
-        self.p0_limit = jnp.where(k == -1, jnp.log(jnp.log(r2/r1)), jnp.log((jnp.power(r2,k1)-jnp.power(r1,k1))/(k1)))
+        self.p0_limit = jnp.where(
+            k == -1, jnp.log(jnp.log(r2/r1)),
+            jnp.log((jnp.power(r2, k1)-jnp.power(r1, k1))/(k1)))
 
         # Create data arrays for initializing interps
-        z0 = vmap(lambda ix: vmap(lambda iy: log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology))(jnp.arange(size)))(jnp.arange(size))
+        z0 = vmap(lambda ix: vmap(lambda iy: log_radial_integral(
+            xmin, ymin, ix, iy, d, r1, r2, k, cosmology))(jnp.arange(size)))
+        (jnp.arange(size))
         z0_flat = jnp.ravel(z0)
 
         # Initialize the interps
@@ -360,11 +374,11 @@ class log_radial_integrator:
         self.region1 = cubic_interp(z1, size, xmin, d)
         z2 = vmap(lambda i: z0[i][size - 1 - i])(jnp.arange(size))
         self.region2 = cubic_interp(z2, size, umin, d)
-    
+
     @staticmethod
     @jit
-    def log_radial_integrator_eval(region0, region1, region2, limits, p, b, log_p, log_b):
-        """Evaluate log radial integral at (p, b) using precomputed interpolants.
+    def integrator_eval(region0, region1, region2, limits, p, b, log_p, log_b):
+        """Evaluate integral at (p, b) using precomputed interpolants.
 
         Parameters
         ----------
@@ -384,116 +398,18 @@ class log_radial_integrator:
         """
         fx, x0, xlength, a = region0
         f1, t01, length1, a1 = region1
-        f2, t02, length2, a2 = region2 
+        f2, t02, length2, a2 = region2
         p0_limit, vmax, ymax = limits
-        x = log_p 
+        x = log_p
         y = jnp.log(2) + 2 * log_p - log_b
         result = jnp.pow(0.5 * b / p, 2)
-        result += jnp.where(y >= ymax, cubic_interp.cubic_interp_eval_jax(x,f1,t01,length1,a1),
-                            jnp.where((0.5 * (x + y)) <= vmax, cubic_interp.cubic_interp_eval_jax(0.5 * (x-y),f2,t02,length2,a2),
-                            bicubic_interp.bicubic_interp_eval_jax(x,y,fx,x0,xlength,a)))
+        result += jnp.where(y >= ymax,
+                            cubic_interp.cubic_interp_eval_jax(
+                                x, f1, t01, length1, a1),
+                            jnp.where((0.5 * (x + y)) <= vmax,
+                                      cubic_interp.cubic_interp_eval_jax(
+                                          0.5 * (x-y), f2, t02, length2, a2),
+                                      bicubic_interp.bicubic_interp_eval_jax(
+                                          x, y, fx, x0, xlength, a)))
 
         return jnp.where(p > 0, result, p0_limit)
-
-# --- TEST SUITE ---
-
-def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
-    p = math.sqrt(p2)
-
-    print(f"EXPECTED: {expected} +/- {tol}")
-    integratora = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
-    start = time.perf_counter()
-    integrator = log_radial_integrator(r1, r2, k, 0, p + 0.5, 400)
-    end = time.perf_counter()
-    print(f"JAX init time: {end - start}")
-
-    region0 = (integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a)
-    region1 = (integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a)
-    region2 = (integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a)
-    limits = (integrator.p0_limit, integrator.vmax, integrator.ymax)
-
-    result_jax_compile = integrator.log_radial_integrator_eval(
-        region0, region1, region2, limits,
-        p, b, jnp.log(p), jnp.log(b)
-    )
-    start = time.perf_counter()
-    result_jax = integrator.log_radial_integrator_eval(
-        region0, region1, region2, limits,
-        p, b, jnp.log(p), jnp.log(b)
-    )
-    end = time.perf_counter()
-    print(f"JAX result: {result_jax}")
-    print(f"JAX time: {end-start}\n")
-
-# test_log_radial_integral(0, 0, 0, 1, 0, 0, 0)
-# test_log_radial_integral(0, 0, jnp.exp(1), jnp.exp(2), 0, 0, -1)
-# test_log_radial_integral(jnp.log(63), 0, 3, 6, 0, 0, 2)
-# test_log_radial_integral(-0.480238, 1e-3, 1, 2, 1, 0, 0)
-# test_log_radial_integral(0.432919, 1e-3, 1, 2, 1, 0, 2)
-# test_log_radial_integral(-2.76076, 1e-3, 0, 1, 1, 0, 2)
-# test_log_radial_integral(61.07118, 1e-3, 0, 1e9, 1, 0, 2)
-# test_log_radial_integral(-112.23053, 5e-2, 0, 0.1, 1, 0, 2)
-# test_log_radial_integral(-jnp.inf, 1e-3, 0, 1e-3, 1, 0, 2)
-# test_log_radial_integral(2.94548, 1e-4, 0, 4, 1, 1, 2)
-# test_log_radial_integral(2.94545, 1e-4, 0.5, 4, 1, 1, 2)
-# test_log_radial_integral(2.94085, 1e-4, 1, 4, 1, 1, 2)
-# test_log_radial_integral(-2.43264, 1e-5, 0, 1, 1, 1, 2)
-# test_log_radial_integral(-2.43808, 1e-5, 0.5, 1, 1, 1, 2)
-# test_log_radial_integral(-0.707038, 1e-5, 1, 1.5, 1, 1, 2)
-
-def test_log_radial_integral(r1, r2, p, b, k, cosmology):
-    # Determine breakpoints and log_offset
-    breakpoints, nbreakpoints = compute_breakpoints(p, b, r1, r2)
-    def log_integrand(r):
-        return log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs)
-
-    log_vals = vmap(log_integrand)(breakpoints)
-    log_vals = jnp.where(jnp.isnan(log_vals), -jnp.inf, log_vals)
-    log_offset = jnp.max(log_vals)
-    log_offset = jnp.where(log_offset == -jnp.inf, 0.0, log_offset)
-
-    def integrand(r):
-        return radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, -log_offset)
-
-    # Adaptive quadrature
-    result, _ = quadgk(integrand, [r1,r2], epsrel=1e-8)
-
-    return jnp.log(result) + log_offset
-
-def full_test_log_radial_integral():
-    r1 = 0.0
-    r2 = 0.25
-    pmax = 1.0
-    k = 2
-    integrator = log_radial_integrator(r1, r2, k, 0, pmax, 400)
-    region0 = (integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a)
-    region1 = (integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a)
-    region2 = (integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a)
-    limits = (integrator.p0_limit, integrator.vmax, integrator.ymax)
-
-    p_values = jnp.arange(0.01, pmax + 0.001, 0.01)
-    b_values = jnp.arange(0.0, 2 * pmax + 0.001, 0.01)
-    p_grid, b_grid = jnp.meshgrid(p_values, b_values, indexing="ij")
-    p_flat = p_grid.ravel()
-    b_flat = b_grid.ravel()
-
-    def compute(p, b):
-        expected = jnp.exp(test_log_radial_integral(r1, r2, p, b, k, 0))
-        result = jnp.exp(
-            log_radial_integrator.log_radial_integrator_eval(
-                region0, region1, region2, limits, p, b, jnp.log(p), jnp.log(b)
-            ) - ((0.5 * b / p) ** 2)
-        )
-        return expected, result
-
-    batched_compute = vmap(compute)
-    expected_vals, result_vals = batched_compute(p_flat, b_flat)
-
-    with open("my_file.txt", "w") as f:
-        for i in range(len(expected_vals)):
-            e = expected_vals[i]
-            r = result_vals[i]
-            print(f"Expected: {e}, Result: {r}")
-            f.write(f"Expected: {e}, Result: {r}\n")
-
-# full_test_log_radial_integral()

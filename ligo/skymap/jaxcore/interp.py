@@ -16,7 +16,6 @@
 #
 from jax import jit, vmap
 import jax.numpy as jnp
-import time
 from functools import partial
 ARANGE4 = jnp.arange(4)
 SQRT_2 = jnp.sqrt(2)
@@ -24,9 +23,11 @@ ETA = 0.01
 
 # --- CUBIC INTERP ---
 
+
 @jit
 def nan_or_inf(x):
     return jnp.isnan(x) | jnp.isinf(x)
+
 
 class cubic_interp:
     """1D cubic interpolation using precomputed coefficients.
@@ -53,11 +54,13 @@ class cubic_interp:
     a : jax.numpy.ndarray
         Array of shape (n+6, 4) containing cubic coefficients.
     """
+
     def __init__(self, data, n, tmin, dt):
         self.f = 1 / dt
         self.t0 = 3 - self.f * tmin
         self.length = n + 6
-        self.a = vmap(lambda idx: self.compute_coeffs(idx, data, n))(jnp.arange(n + 6))
+        self.a = vmap(lambda idx: self.compute_coeffs(
+            idx, data, n))(jnp.arange(n + 6))
 
     @staticmethod
     @jit
@@ -128,7 +131,7 @@ class cubic_interp:
         x = jnp.clip(data * f + t0, 0.0, length - 1.0)
         ix = x.astype(int)
         x -= ix
-        
+
         a0 = a[ix, 0]
         a1 = a[ix, 1]
         a2 = a[ix, 2]
@@ -138,9 +141,12 @@ class cubic_interp:
 
 # --- BICUBIC INTERP ---
 
+
 @jit
 def cubic_eval(coeffs, x):
-    return ((coeffs[..., 0] * x + coeffs[..., 1]) * x + coeffs[..., 2]) * x + coeffs[..., 3]
+    return ((coeffs[..., 0] * x + coeffs[..., 1])
+            * x + coeffs[..., 2]) * x + coeffs[..., 3]
+
 
 @jit
 def interpolate_1d(z):
@@ -172,6 +178,7 @@ def interpolate_1d(z):
         jnp.where(bad12, 0.0, jnp.where(bad03, z[2]-z[1], a2)),
         jnp.where(bad12, z[1], a3)
     ])
+
 
 @partial(jit, static_argnames=['ns', 'nt'])
 def compute_coeffs(data, ns, nt):
@@ -207,8 +214,10 @@ def compute_coeffs(data, ns, nt):
         a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(ARANGE4)
         return vmap(interpolate_1d)(a_rows.T)
 
-    blocks = vmap(lambda iss: vmap(lambda itt: compute_block(iss, itt))(jnp.arange(length_t)))(jnp.arange(length_s))
+    blocks = vmap(lambda iss: vmap(lambda itt: compute_block(iss, itt))(
+        jnp.arange(length_t)))(jnp.arange(length_s))
     return blocks.reshape(length_s * length_t, 4, 4)
+
 
 class bicubic_interp:
     """2D bicubic interpolation using precomputed coefficients.
@@ -235,11 +244,12 @@ class bicubic_interp:
     a : jax.numpy.ndarray
         Precomputed bicubic coefficient tensor.
     """
+
     def __init__(self, data, ns, nt, smin, tmin, ds, dt):
         self.fx = jnp.array([1/ds, 1/dt])
         self.x0 = jnp.array([3 - self.fx[0] * smin, 3 - self.fx[1] * tmin])
         self.xlength = jnp.array([ns + 6, nt + 6])
-        self.a = compute_coeffs(data,ns,nt)
+        self.a = compute_coeffs(data, ns, nt)
 
     @staticmethod
     @jit
@@ -265,8 +275,8 @@ class bicubic_interp:
             Interpolated value at the given point(s).
         """
         s = jnp.asarray(s)
-        t = jnp.asarray(t)         
-        x = jnp.stack([s, t], axis=-1)  
+        t = jnp.asarray(t)
+        x = jnp.stack([s, t], axis=-1)
 
         def eval_point(x):
             x = jnp.atleast_1d(x)
@@ -279,64 +289,11 @@ class bicubic_interp:
             x_frac = x_clipped - ix
 
             flat_idx = ix[0] * xlength[1] + ix[1]
-            coeff = a[flat_idx] 
+            coeff = a[flat_idx]
 
             b = cubic_eval(coeff.T, x_frac[1])
-            result = cubic_eval(b, x_frac[0])  
+            result = cubic_eval(b, x_frac[0])
 
             return jnp.where(is_nan, x[0] + x[1], result)
 
         return eval_point(x)
-
-# --- TEST SUITE ---
-
-def test_cubic_interp_0():
-    t = jnp.arange(-10.0, 10.0 + 0.01, 0.01)
-    test = cubic_interp(jnp.array([0,0,0,0]), 4, -1, 1)
-
-    _ = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
-
-    start = time.perf_counter()
-    result = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
-    end = time.perf_counter()
-    print(end-start)
-    print(result) # expected all 0s
-
-def test_cubic_interp_1():
-    t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = cubic_interp(jnp.array([1,0,1,4]), 4, -1, 1)
-
-    _ = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
-
-    start = time.perf_counter()
-    result = test.cubic_interp_eval_jax(t,test.f,test.t0,test.length,test.a)
-    end = time.perf_counter()
-    print(end-start)
-    print(result) # expected all squared values
-
-def test_bicubic_interp_0():
-    s = jnp.arange(0, 2 + 0.01, 0.01)
-    t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = bicubic_interp(jnp.array([-1,-1,-1,-1,0,0,0,0,1,1,1,1,2,2,2,2]),4,4,-1,-1,1,1)
-
-    _ = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
-
-    start = time.perf_counter()
-    result = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
-    print(jnp.shape(result))
-    end = time.perf_counter()
-    print(end-start)
-    print(result) # expect values 0 - 2
-
-def test_bicubic_interp_1():
-    s = jnp.arange(0, 2 + 0.01, 0.01)
-    t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = bicubic_interp(jnp.array([-1,-1,-1,-1,0,0,0,0,1,1,1,1,8,8,8,8]),4,4,-1,-1,1,1)
-
-    _ = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
-
-    start = time.perf_counter()
-    result = test.bicubic_interp_eval_jax(s,t,test.fx,test.x0,test.xlength,test.a)
-    end = time.perf_counter()
-    print(end-start)
-    print(result) # expect values 0 - 8

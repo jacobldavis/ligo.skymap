@@ -16,14 +16,12 @@
 #
 
 import numpy as np
-from jax import jit, vmap, lax
-import jax
+from jax import jit, vmap
 import jax.numpy as jnp
 from functools import partial
-from ligo.skymap.jaxcore.jax_interp import *
-from ligo.skymap.jaxcore.jax_integrate import *
-from ligo.skymap.jaxcore.jax_cosmology import *
-from ligo.skymap.jaxcore.jax_moc import *
+from ligo.skymap.jaxcore.integrate import log_radial_integrator
+from ligo.skymap.jaxcore.moc import nu, ntwopsi, uniq2ang64, ang2vec, M_PI_2
+
 
 def extract_integrator_regions(integrators):
     """
@@ -42,11 +40,15 @@ def extract_integrator_regions(integrators):
     result = []
     for integrator in integrators:
         result.append((
-            (integrator.region0.fx, integrator.region0.x0, integrator.region0.xlength, integrator.region0.a),
-            (integrator.region1.f, integrator.region1.t0, integrator.region1.length, integrator.region1.a),
-            (integrator.region2.f, integrator.region2.t0, integrator.region2.length, integrator.region2.a),
+            (integrator.region0.fx, integrator.region0.x0,
+             integrator.region0.xlength, integrator.region0.a),
+            (integrator.region1.f, integrator.region1.t0,
+             integrator.region1.length, integrator.region1.a),
+            (integrator.region2.f, integrator.region2.t0,
+             integrator.region2.length, integrator.region2.a),
         ))
-    return result 
+    return result
+
 
 def extract_integrator_limits(integrators):
     """
@@ -67,6 +69,7 @@ def extract_integrator_limits(integrators):
         result.append((integrator.p0_limit, integrator.vmax, integrator.ymax))
     return result
 
+
 @partial(jit, static_argnames=["nu"])
 def u_points_weights_init(nu):
     """
@@ -80,19 +83,21 @@ def u_points_weights_init(nu):
     Returns
     -------
     jnp.ndarray
-        Array of shape (nu, 2) where [:,0] are the u-values and [:,1] are log(weights).
+        Array of shape (nu, 2)
     """
     points, weights = np.polynomial.legendre.leggauss(nu)
 
     u_points_weights = np.column_stack((points, np.log(weights)))
     return jnp.array(u_points_weights)
 
+
 u_points_weights = u_points_weights_init(nu)
+
 
 @jit
 def antenna_factor(D, ra, dec, gmst):
     """
-    Compute antenna factors from the detector response tensor and source sky location.
+    Compute antenna factors from the detector response tensor.
 
     Parameters
     ----------
@@ -118,12 +123,14 @@ def antenna_factor(D, ra, dec, gmst):
     X = jnp.array([-singha, -cosgha, 0.0])
     Y = jnp.array([-cosgha * sindec, singha * sindec, cosdec])
     F = 0
+
     def dxdy(i):
         DX = D[i][0] * X[0] + D[i][1] * X[1] + D[i][2] * X[2]
         DY = D[i][0] * Y[0] + D[i][1] * Y[1] + D[i][2] * Y[2]
         return (X[i] * DX - Y[i] * DY) + (X[i] * DY + Y[i] * DX) * 1j
     F = jnp.sum(vmap(dxdy)(jnp.arange(3)))
     return F
+
 
 @jit
 def compute_F(responses, horizons, phi, theta, gmst):
@@ -151,10 +158,12 @@ def compute_F(responses, horizons, phi, theta, gmst):
     nifos = responses.shape[0]
 
     def body(i):
-        val = antenna_factor(responses[i], phi, M_PI_2 - theta, gmst) * horizons[i]
+        val = antenna_factor(
+            responses[i], phi, M_PI_2 - theta, gmst) * horizons[i]
         return val
 
     return vmap(lambda i: body(i))(jnp.arange(nifos))
+
 
 @jit
 def toa_errors(theta, phi, gmst, locs, toas):
@@ -180,20 +189,25 @@ def toa_errors(theta, phi, gmst, locs, toas):
         Time delay offsets.
     """
     n = ang2vec(theta, phi - gmst)
-    dot = jnp.dot(locs, n)        
-    dt = toas + dot             
+    dot = jnp.dot(locs, n)
+    dt = toas + dot
     return dt
+
 
 @jit
 def catrom(x0, x1, x2, x3, t):
-    return x1 + t*(-0.5*x0 + 0.5*x2 + t*(x0 - 2.5*x1 + 2.0*x2 - 0.5*x3 + t*(-0.5*x0 + 1.5*x1 - 1.5*x2 + 0.5*x3)))
+    return x1 + t*(-0.5*x0 + 0.5*x2 +
+                   t*(x0 - 2.5*x1 + 2.0*x2 - 0.5*x3 +
+                      t*(-0.5*x0 + 1.5*x1 - 1.5*x2 + 0.5*x3)))
 
-@jit 
+
+@jit
 def exp_i(phi):
     phi = jnp.float32(phi)
     return jnp.cos(phi) + 1j * jnp.sin(phi)
 
-@jit 
+
+@jit
 def eval_snr(x, nsamples, t):
     """
     Evaluate interpolated complex SNR at fractional sample index.
@@ -224,6 +238,7 @@ def eval_snr(x, nsamples, t):
     val = mag * exp_i(phase)
     return jnp.where(cond, val, jnp.complex64(0.0 + 0.0j))
 
+
 @jit
 def bayestar_signal_amplitude_model(F, exp_i_twopsi, u, u2):
     """
@@ -248,6 +263,7 @@ def bayestar_signal_amplitude_model(F, exp_i_twopsi, u, u2):
     tmp = F * jnp.conj(exp_i_twopsi)
     return 0.5 * (1 + u2) * jnp.real(tmp) - 1j * u * jnp.imag(tmp)
 
+
 @jit
 def compute_samplewise_b(z_times_r, snrs_interp_sample, rescale_loglikelihood):
     """
@@ -271,6 +287,7 @@ def compute_samplewise_b(z_times_r, snrs_interp_sample, rescale_loglikelihood):
     b_val = jnp.abs(I0arg) * rescale_loglikelihood**2
     return b_val, jnp.log(b_val)
 
+
 @jit
 def compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood):
     """
@@ -292,21 +309,25 @@ def compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood):
     Returns
     -------
     tuple
-        Marginalized likelihood p, log(p), samplewise b values and log(b) values.
+        Marginalized likelihood values.
     """
     u2 = u * u
 
-    z_times_r = vmap(lambda Fi: bayestar_signal_amplitude_model(Fi, exp_i_twopsi, u, u2))(F)
+    z_times_r = vmap(lambda Fi: bayestar_signal_amplitude_model(
+        Fi, exp_i_twopsi, u, u2))(F)
     p2 = jnp.sum(jnp.real(z_times_r)**2 + jnp.imag(z_times_r)**2)
     p2 *= 0.5 * rescale_loglikelihood**2
     p = jnp.sqrt(p2)
     logp = jnp.log(p)
 
-    b_vals, log_b_vals = vmap(lambda snr: compute_samplewise_b(z_times_r, snr, rescale_loglikelihood))(snrs_interp)
+    b_vals, log_b_vals = vmap(lambda snr: compute_samplewise_b(
+        z_times_r, snr, rescale_loglikelihood))(snrs_interp)
     return p, logp, b_vals, log_b_vals
 
+
 @partial(jit, static_argnames=["ntwopsi"])
-def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood):
+def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi,
+                         rescale_loglikelihood):
     """
     Evaluate marginalized likelihood for all inclination angles at a fixed 2ψ.
 
@@ -333,9 +354,11 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
 
     def process_u(iu):
         u = u_points_weights[iu, 0]
-        return compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood)
+        return compute_u_point(F, exp_i_twopsi, u, snrs_interp,
+                               rescale_loglikelihood)
 
     return vmap(process_u)(jnp.arange(u_points_weights.shape[0]))
+
 
 @jit
 def compute_accum(iint, accum):
@@ -355,7 +378,7 @@ def compute_accum(iint, accum):
         Log of total accumulated value.
     """
     accum_iint = accum[iint]
-    accum_flat = accum_iint.reshape(-1) 
+    accum_flat = accum_iint.reshape(-1)
 
     max_accum = jnp.max(accum_flat)
 
@@ -364,18 +387,23 @@ def compute_accum(iint, accum):
 
     return jnp.log(accum1) + max_accum
 
+
 @jit
-def safe_eval(integrator_tuple, integrator_b, itwopsi, iu, isample, u_points_weights, p, b, log_p, log_b):
-    val = u_points_weights[iu][1] + log_radial_integrator.log_radial_integrator_eval(
+def safe_eval(integrator_tuple, integrator_b, itwopsi, iu, isample,
+              u_points_weights, p, b, log_p, log_b):
+    val = u_points_weights[iu][1] + log_radial_integrator.integrator_eval(
         integrator_tuple[0], integrator_tuple[1], integrator_tuple[2],
         integrator_b, p[itwopsi][iu], b[itwopsi][iu][isample],
         log_p[itwopsi][iu], log_b[itwopsi][iu][isample])
     return jnp.where(jnp.isfinite(val), val, u_points_weights[iu][1])
 
+
 @jit
-def bsm_pixel_prob_jax(integrators, uniq, px, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_prob_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
+                       epochs, snrs, responses, locations, horizons,
+                       rescale_loglikelihood):
     """
-    Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
+    Compute likelihood integrals over inclination and polarization.
 
     Parameters
     ----------
@@ -422,25 +450,38 @@ def bsm_pixel_prob_jax(integrators, uniq, px, gmst, nsamples, sample_rate, epoch
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+    snrs_interp = vmap(lambda isample:
+                       vmap(lambda x, tt:
+                            eval_snr(x, nsamples, tt))(
+                           snrs, isample - dt * sample_rate
+                           - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
+    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(
+        F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))
+    (jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum0 = vmap(lambda itwopsi:
+                  vmap(lambda iu:
+                       vmap(lambda isample:
+                            safe_eval(integrators[0][0], integrators[1][0],
+                                      itwopsi, iu, isample,
+                                      u_points_weights, p, b, log_p, log_b))
+                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
+    (jnp.arange(ntwopsi))
     accum = jnp.array([accum0])
 
     # Return updated pixel row
     return px.at[1].set(compute_accum(0, accum))
 
+
 @jit
-def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
+                       epochs, snrs, responses, locations, horizons,
+                       rescale_loglikelihood):
     """
-    Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
+    Compute likelihood integrals over inclination and polarization.
 
     Parameters
     ----------
@@ -487,20 +528,34 @@ def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate, epoch
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+    snrs_interp = vmap(lambda isample:
+                       vmap(lambda x, tt:
+                            eval_snr(x, nsamples, tt))(
+                           snrs, isample - dt * sample_rate
+                           - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
+    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(
+        F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))
+    (jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum1 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][1], integrators[1][1], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
-    accum2 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][2], integrators[1][2], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum1 = vmap(lambda itwopsi:
+                  vmap(lambda iu:
+                       vmap(lambda isample:
+                            safe_eval(integrators[0][1], integrators[1][1],
+                                      itwopsi, iu, isample,
+                                      u_points_weights, p, b, log_p, log_b))
+                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
+    (jnp.arange(ntwopsi))
+    accum2 = vmap(lambda itwopsi:
+                  vmap(lambda iu:
+                       vmap(lambda isample:
+                            safe_eval(integrators[0][2], integrators[1][2],
+                                      itwopsi, iu, isample,
+                                      u_points_weights, p, b, log_p, log_b))
+                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
+    (jnp.arange(ntwopsi))
     accum = jnp.array([accum1, accum2])
 
     # Return updated pixel row
@@ -508,10 +563,13 @@ def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate, epoch
     px = px.at[3].set(compute_accum(1, accum))
     return px
 
+
 @jit
-def bsm_pixel_accum_jax(integrators, uniq, gmst, nsamples, sample_rate, epochs, snrs, responses, locations, horizons, rescale_loglikelihood):
+def bsm_pixel_accum_jax(integrators, uniq, gmst, nsamples, sample_rate, epochs,
+                        snrs, responses, locations, horizons,
+                        rescale_loglikelihood):
     """
-    Compute likelihood integrals over inclination and polarization for one HEALPix pixel.
+    Compute likelihood integrals over inclination and polarization.
 
     Parameters
     ----------
@@ -561,56 +619,27 @@ def bsm_pixel_accum_jax(integrators, uniq, gmst, nsamples, sample_rate, epochs, 
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+    snrs_interp = vmap(lambda isample:
+                       vmap(lambda x, tt:
+                            eval_snr(x, nsamples, tt))(
+                           snrs, isample - dt * sample_rate
+                           - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))(jnp.arange(ntwopsi))
+    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(
+        F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))
+    (jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = vmap(lambda itwopsi: vmap(lambda iu: vmap(lambda isample: 
-                        safe_eval(integrators[0][0], integrators[1][0], itwopsi, iu, isample,
-                                  u_points_weights, p, b, log_p, log_b))
-                    (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))(jnp.arange(ntwopsi))
+    accum0 = vmap(lambda itwopsi:
+                  vmap(lambda iu:
+                       vmap(lambda isample:
+                            safe_eval(integrators[0][0], integrators[1][0],
+                                      itwopsi, iu, isample,
+                                      u_points_weights, p, b, log_p, log_b))
+                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
+    (jnp.arange(ntwopsi))
     accum = jnp.array([accum0])
 
     # Return updated accum value
     return compute_accum(0, accum)
-
-# --- TEST SUITE ---
-
-def test_eval_snr():
-    nsamples = 64
-    x = np.zeros((nsamples, 2))
-
-    # Populate data with samples of x(t) = t^2 * exp(i * t)
-    for i in range(nsamples):
-        x[i][0] = i ** 2      # real part
-        x[i][1] = i           # imaginary part
-
-    for t in np.arange(0, nsamples + 0.1, 0.1):
-        result = eval_snr(x, nsamples, t)
-        expected = t**2 * exp_i(t) if 1 < t < nsamples - 2 else 0
-
-        print(result)
-        print(expected)
-
-def test_pixels_tracer():
-    order0 = 4
-    npix0 = 4000
-    pixels = vmap(lambda ipix: jnp.concatenate([
-            jnp.array([nest2uniq64(order0, ipix)]),
-            jnp.zeros(3)
-        ]))(jnp.arange(npix0))
-    print(pixels)
-
-    theta, phi = uniq2ang64(pixels[1690,0])
-    jax.debug.print("theta: {}, phi: {}", theta, phi)
-
-    def test_bug(pixels):
-        def body(i, _):
-            theta, phi = uniq2ang64(lax.dynamic_slice(pixels, (i, 0), (1, 1))[0, 0])
-            jax.debug.print("i={}, uniq={}, theta={}, phi={}", i, pixels[i,0], theta, phi)
-            return _
-        return lax.fori_loop(0, pixels.shape[0], body, None)
-
-    test_bug(pixels)
