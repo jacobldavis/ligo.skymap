@@ -15,15 +15,27 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from jax import jit, vmap, lax
-import jax.numpy as jnp
 from functools import partial
-from .moc import ntwopsi, uniq2pixarea64, uniq2order64, nest2uniq64, \
-    M_LN2, default_log_radial_integrator_size
-from .pixel import bsm_pixel_accum_jax, bsm_pixel_dist_jax, \
-    bsm_pixel_prob_jax, extract_integrator_limits, \
-    extract_integrator_regions, \
-    log_radial_integrator
+
+import jax.numpy as jnp
+from jax import jit, lax, vmap
+
+from .moc import (
+    M_LN2,
+    default_log_radial_integrator_size,
+    nest2uniq64,
+    ntwopsi,
+    uniq2order64,
+    uniq2pixarea64,
+)
+from .pixel import (
+    bsm_pixel_accum_jax,
+    bsm_pixel_dist_jax,
+    bsm_pixel_prob_jax,
+    extract_integrator_limits,
+    extract_integrator_regions,
+    log_radial_integrator,
+)
 
 
 @jit
@@ -50,7 +62,7 @@ def logsumexp(accum, log_weight):
     return result
 
 
-@partial(jit, static_argnames=['last_n'])
+@partial(jit, static_argnames=["last_n"])
 def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
     """
     Refine pixels by splitting the last_n entries into 4 child pixels each.
@@ -80,12 +92,10 @@ def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
         base_uniq = 4 * pixels[length - i - 1, 0]
         child_uniqs = jnp.arange(4, dtype=pixels.dtype) + base_uniq
         child_aux = jnp.zeros((4, 3), dtype=pixels.dtype)
-        new_children = jnp.concatenate(
-            [child_uniqs[:, None], child_aux], axis=1)
+        new_children = jnp.concatenate([child_uniqs[:, None], child_aux], axis=1)
 
         dest_idx = new_length - 4 * i - 4
-        new_pixels = lax.dynamic_update_slice(
-            new_pixels, new_children, (dest_idx, 0))
+        new_pixels = lax.dynamic_update_slice(new_pixels, new_children, (dest_idx, 0))
         return new_pixels
 
     new_pixels = lax.fori_loop(0, last_n, refine_loop, new_pixels)
@@ -129,6 +139,7 @@ def bayestar_pixels_sort_prob(pixels):
     array_like
         Sorted pixel array.
     """
+
     def compute_score(pixel):
         uniq = pixel[0]
         logp = pixel[1]
@@ -156,18 +167,33 @@ def bayestar_pixels_sort_uniq(pixels):
     array_like
         Sorted array.
     """
+
     def get_uniq(i):
         return pixels[i, 0]
+
     uniq = vmap(get_uniq)(jnp.arange(pixels.shape[0]))
     sorted_indices = jnp.argsort(uniq)
     return pixels[sorted_indices]
 
 
-@partial(jit, static_argnames=['nifos'])
-def bsm_jax(min_distance, max_distance, prior_distance_power,
-            cosmology, gmst, nifos, nsamples, sample_rate, epochs, snrs,
-            responses, locations, horizons, rescale_loglikelihood,
-            bs=24):
+@partial(jit, static_argnames=["nifos"])
+def bsm_jax(
+    min_distance,
+    max_distance,
+    prior_distance_power,
+    cosmology,
+    gmst,
+    nifos,
+    nsamples,
+    sample_rate,
+    epochs,
+    snrs,
+    responses,
+    locations,
+    horizons,
+    rescale_loglikelihood,
+    bs=24,
+):
     """
     Compute Bayesian sky localization and distance posteriors.
 
@@ -212,12 +238,16 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
           or swap lax.map to vmap to increase performance.
     """
     # Initialize integrators
-    pmax = jnp.sqrt(0.5 * jnp.sum(jnp.square(horizons))) * \
-        rescale_loglikelihood
+    pmax = jnp.sqrt(0.5 * jnp.sum(jnp.square(horizons))) * rescale_loglikelihood
     integrators = [
-        log_radial_integrator(min_distance, max_distance,
-                              prior_distance_power + k, cosmology,
-                              pmax, default_log_radial_integrator_size)
+        log_radial_integrator(
+            min_distance,
+            max_distance,
+            prior_distance_power + k,
+            cosmology,
+            pmax,
+            default_log_radial_integrator_size,
+        )
         for k in range(3)
     ]
     regions = extract_integrator_regions(integrators)
@@ -226,58 +256,71 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Initialize pixels
     order0 = 4
-    nside = 2 ** order0
+    nside = 2**order0
     npix0 = 12 * nside * nside
-    pixels = vmap(lambda ipix: jnp.concatenate([
-        jnp.array([nest2uniq64(order0, ipix)]),
-        jnp.zeros(3)
-    ]))(jnp.arange(npix0))
+    pixels = vmap(
+        lambda ipix: jnp.concatenate(
+            [jnp.array([nest2uniq64(order0, ipix)]), jnp.zeros(3)]
+        )
+    )(jnp.arange(npix0))
 
     # Compute the coherent probability map
     # and incoherent evidence at the lowest order
     i = integrators
     log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples)
-    log_norm -= log_radial_integrator.integrator_eval(regions[0][0],
-                                                      regions[0][1],
-                                                      regions[0][2],
-                                                      (i[0].p0_limit,
-                                                       i[0].vmax,
-                                                       i[0].ymax),
-                                                      0, 0,
-                                                      -jnp.inf,
-                                                      -jnp.inf)
+    log_norm -= log_radial_integrator.integrator_eval(
+        regions[0][0],
+        regions[0][1],
+        regions[0][2],
+        (i[0].p0_limit, i[0].vmax, i[0].ymax),
+        0,
+        0,
+        -jnp.inf,
+        -jnp.inf,
+    )
     accum = jnp.zeros((npix0, nifos))
 
     def update_pixel_row(px_row):
         return bsm_pixel_prob_jax(
-            integrators_values, px_row[0], px_row,
-            gmst, nsamples, sample_rate,
-            epochs, snrs, responses, locations, horizons,
-            rescale_loglikelihood
+            integrators_values,
+            px_row[0],
+            px_row,
+            gmst,
+            nsamples,
+            sample_rate,
+            epochs,
+            snrs,
+            responses,
+            locations,
+            horizons,
+            rescale_loglikelihood,
         )
 
-    def update_accum_row(px_row, iifo):
+    def update_acc_row(px_row, iifo):
         return bsm_pixel_accum_jax(
-            integrators_values, px_row[0],
-            gmst, nsamples, sample_rate,
+            integrators_values,
+            px_row[0],
+            gmst,
+            nsamples,
+            sample_rate,
             lax.dynamic_slice(epochs, (iifo,), (1,)),
-            lax.dynamic_slice(snrs, (iifo, 0, 0),
-                              (1, snrs.shape[1], snrs.shape[2])),
-            lax.dynamic_slice(responses, (iifo, 0, 0),
-                              (1, responses.shape[1], responses.shape[2])),
+            lax.dynamic_slice(snrs, (iifo, 0, 0), (1, snrs.shape[1], snrs.shape[2])),
+            lax.dynamic_slice(
+                responses, (iifo, 0, 0), (1, responses.shape[1], responses.shape[2])
+            ),
             lax.dynamic_slice(locations, (iifo, 0), (1, locations.shape[1])),
             lax.dynamic_slice(horizons, (iifo,), (1,)),
-            rescale_loglikelihood
+            rescale_loglikelihood,
         )
 
     def run_all_vmap(pixels, accum):
         pixels_new_rows = lax.map(
-            lambda px_row: update_pixel_row(px_row), pixels, batch_size=bs)
+            lambda px_row: update_pixel_row(px_row), pixels, batch_size=bs
+        )
         pixels = pixels.at[:].set(pixels_new_rows)
 
-        def update_incoherent(px_row):
-            return vmap(lambda iifo: update_accum_row(px_row, iifo))
-        (jnp.arange(nifos))
+        def update_incoherent(px):
+            return vmap(lambda i: update_acc_row(px, i))(jnp.arange(nifos))
 
         accum = lax.map(update_incoherent, pixels, batch_size=bs)
 
@@ -295,8 +338,9 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         pixels, length = bayestar_pixels_refine(pixels, npix0 // 4)
 
         new_rows = pixels[-(npix0):]
-        updated_rows = lax.map(lambda px_row: update_pixel_row(
-            px_row), new_rows, batch_size=bs)
+        updated_rows = lax.map(
+            lambda px_row: update_pixel_row(px_row), new_rows, batch_size=bs
+        )
         pixels = pixels.at[-(npix0):].set(updated_rows)
 
         pixels = bayestar_pixels_sort_prob(pixels)
@@ -312,10 +356,20 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Evaluate distance layers
     def update_distance_row(px):
-        return bsm_pixel_dist_jax(integrators_values, px[0], px,
-                                  gmst, nsamples, sample_rate,
-                                  epochs, snrs, responses, locations, horizons,
-                                  rescale_loglikelihood)
+        return bsm_pixel_dist_jax(
+            integrators_values,
+            px[0],
+            px,
+            gmst,
+            nsamples,
+            sample_rate,
+            epochs,
+            snrs,
+            responses,
+            locations,
+            horizons,
+            rescale_loglikelihood,
+        )
 
     distance_rows = lax.map(update_distance_row, pixels, batch_size=bs)
     pixels = pixels.at[:].set(distance_rows)
@@ -338,7 +392,7 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
         logp = px[1]
         prob = jnp.exp(logp) * inv_norm
         rmean = jnp.exp(px[2] - logp)
-        rvar = jnp.exp(px[3] - logp) - rmean ** 2
+        rvar = jnp.exp(px[3] - logp) - rmean**2
         rmean = jnp.where(rvar >= 0, rmean, jnp.inf)
         rstd = jnp.where(rvar >= 0, jnp.sqrt(rvar), 1.0)
         return px.at[1].set(prob).at[2].set(rmean).at[3].set(rstd)
@@ -350,7 +404,6 @@ def bsm_jax(min_distance, max_distance, prior_distance_power,
 
     # Calculate log Bayes factor and return
     log_bci = log_bsn = log_evidence_coherent
-    log_bci -= jnp.sum(
-        vmap(lambda i: log_evidence_incoherent[i])(jnp.arange(nifos)))
+    log_bci -= jnp.sum(vmap(lambda i: log_evidence_incoherent[i])(jnp.arange(nifos)))
 
     return pixels, log_bci, log_bsn

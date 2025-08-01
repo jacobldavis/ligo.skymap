@@ -15,14 +15,20 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from quadax import quadgk  # type: ignore
-from jax import jit, vmap, lax
-from jax.scipy.special import i0e
 import jax.numpy as jnp
-from ligo.skymap.jaxcore.interp import cubic_interp, bicubic_interp, SQRT_2
-from ligo.skymap.jaxcore.cosmology import dVC_dVL_data, dVC_dVL_tmin, \
-    dVC_dVL_dt, dVC_dVL_high_z_intercept, \
-    dVC_dVL_high_z_slope, dVC_dVL_tmax
+from jax import jit, lax, vmap
+from jax.scipy.special import i0e
+from quadax import quadgk  # type: ignore
+
+from ligo.skymap.jaxcore.cosmology import (
+    dVC_dVL_data,
+    dVC_dVL_dt,
+    dVC_dVL_high_z_intercept,
+    dVC_dVL_high_z_slope,
+    dVC_dVL_tmax,
+    dVC_dVL_tmin,
+)
+from ligo.skymap.jaxcore.interp import SQRT_2, bicubic_interp, cubic_interp
 
 # --- COSMOLOGY ---
 
@@ -64,8 +70,7 @@ def compute_natural_cubic_spline_coeffs(x, y):
 
     for j in range(n - 2, -1, -1):
         c = c.at[j].set(z[j] - mu[j] * c[j + 1])
-        b = b.at[j].set((y[j + 1] - y[j]) / h[j] - h[j]
-                        * (c[j + 1] + 2 * c[j]) / 3)
+        b = b.at[j].set((y[j + 1] - y[j]) / h[j] - h[j] * (c[j + 1] + 2 * c[j]) / 3)
         d = d.at[j].set((c[j + 1] - c[j]) / (3 * h[j]))
 
     a = y[:-1]
@@ -93,10 +98,9 @@ def evaluate_cubic_spline(x_knots, coeffs, x_eval):
     a, b, c, d = coeffs
 
     def eval_one(x_val):
-        i = jnp.clip(jnp.searchsorted(x_knots, x_val) -
-                     1, 0, x_knots.shape[0] - 2)
+        i = jnp.clip(jnp.searchsorted(x_knots, x_val) - 1, 0, x_knots.shape[0] - 2)
         dx = x_val - x_knots[i]
-        return (dx * (dx * (dx * d[i] + c[i]) + b[i]) + a[i])
+        return dx * (dx * (dx * d[i] + c[i]) + b[i]) + a[i]
 
     return vmap(eval_one)(x_eval)
 
@@ -136,12 +140,11 @@ def log_dVC_dVL(DL, x_knots, coeffs):
     linear_val = dVC_dVL_high_z_slope * log_DL + dVC_dVL_high_z_intercept
 
     return jnp.where(
-        log_DL <= dVC_dVL_tmin, 0.0,
-        jnp.where(
-            log_DL >= dVC_dVL_tmax, linear_val,
-            spline_val
-        )
+        log_DL <= dVC_dVL_tmin,
+        0.0,
+        jnp.where(log_DL >= dVC_dVL_tmax, linear_val, spline_val),
     )
+
 
 # --- INTEGRATOR ---
 
@@ -172,7 +175,7 @@ def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
 
     NOTE: cosmology is temporarily disabled to increase runtimes
     """
-    ret = jnp.log(i0e(b/r)*jnp.pow(r, k)) + scale - jnp.pow(p/r - 0.5 * b/p, 2)
+    ret = jnp.log(i0e(b / r) * jnp.pow(r, k)) + scale - jnp.pow(p / r - 0.5 * b / p, 2)
     return ret
 
 
@@ -237,7 +240,7 @@ def compute_breakpoints(p, b, r1, r2):
     n = 1
 
     def try_add(bp, x, n):
-        cond = jnp.logical_and(x > bp[n-1], x < r2)
+        cond = jnp.logical_and(x > bp[n - 1], x < r2)
         bp = lax.cond(cond, lambda b: b.at[n].set(x), lambda b: b, bp)
         n = n + cond
         return bp, n
@@ -259,10 +262,7 @@ def compute_breakpoints(p, b, r1, r2):
         return bp, n
 
     breakpoints, nbreakpoints = lax.cond(
-        b != 0,
-        with_b_nonzero,
-        with_b_zero,
-        operand=(breakpoints, n)
+        b != 0, with_b_nonzero, with_b_zero, operand=(breakpoints, n)
     )
 
     return breakpoints, nbreakpoints
@@ -310,8 +310,7 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     log_offset = jnp.where(log_offset == -jnp.inf, 0.0, log_offset)
 
     def integrand(r):
-        return radial_integrand(r, p, b, k, cosmology, x_knots, coeffs,
-                                -log_offset)
+        return radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, -log_offset)
 
     # Adaptive quadrature
     result, _ = quadgk(integrand, [r1, r2], epsrel=1e-8)
@@ -353,24 +352,30 @@ class log_radial_integrator:
         self.ymax = x0 + alpha
         ymin = 2 * x0 - SQRT_2 * alpha - xmax
         d = (xmax - xmin) / (size - 1)
-        umin = - (1 + 1/SQRT_2) * alpha
-        self.vmax = x0 - (1/SQRT_2) * alpha
+        umin = -(1 + 1 / SQRT_2) * alpha
+        self.vmax = x0 - (1 / SQRT_2) * alpha
         k1 = k + 1
         r2 = jnp.where(1e-12 > r2, 1e-12, r2)
         r1 = jnp.where(1e-12 > r1, 1e-12, r1)
         self.p0_limit = jnp.where(
-            k == -1, jnp.log(jnp.log(r2/r1)),
-            jnp.log((jnp.power(r2, k1)-jnp.power(r1, k1))/(k1)))
+            k == -1,
+            jnp.log(jnp.log(r2 / r1)),
+            jnp.log((jnp.power(r2, k1) - jnp.power(r1, k1)) / (k1)),
+        )
 
         # Create data arrays for initializing interps
-        z0 = vmap(lambda ix: vmap(lambda iy: log_radial_integral(
-            xmin, ymin, ix, iy, d, r1, r2, k, cosmology))(jnp.arange(size)))
-        (jnp.arange(size))
+        z0 = vmap(
+            lambda ix: vmap(
+                lambda iy: log_radial_integral(
+                    xmin, ymin, ix, iy, d, r1, r2, k, cosmology
+                )
+            )(jnp.arange(size))
+        )(jnp.arange(size))
         z0_flat = jnp.ravel(z0)
 
         # Initialize the interps
         self.region0 = bicubic_interp(z0_flat, size, size, xmin, ymin, d, d)
-        z1 = vmap(lambda i: z0[i][size-1])(jnp.arange(size))
+        z1 = vmap(lambda i: z0[i][size - 1])(jnp.arange(size))
         self.region1 = cubic_interp(z1, size, xmin, d)
         z2 = vmap(lambda i: z0[i][size - 1 - i])(jnp.arange(size))
         self.region2 = cubic_interp(z2, size, umin, d)
@@ -403,13 +408,14 @@ class log_radial_integrator:
         x = log_p
         y = jnp.log(2) + 2 * log_p - log_b
         result = jnp.pow(0.5 * b / p, 2)
-        result += jnp.where(y >= ymax,
-                            cubic_interp.cubic_interp_eval_jax(
-                                x, f1, t01, length1, a1),
-                            jnp.where((0.5 * (x + y)) <= vmax,
-                                      cubic_interp.cubic_interp_eval_jax(
-                                          0.5 * (x-y), f2, t02, length2, a2),
-                                      bicubic_interp.bicubic_interp_eval_jax(
-                                          x, y, fx, x0, xlength, a)))
+        result += jnp.where(
+            y >= ymax,
+            cubic_interp.cubic_interp_eval_jax(x, f1, t01, length1, a1),
+            jnp.where(
+                (0.5 * (x + y)) <= vmax,
+                cubic_interp.cubic_interp_eval_jax(0.5 * (x - y), f2, t02, length2, a2),
+                bicubic_interp.bicubic_interp_eval_jax(x, y, fx, x0, xlength, a),
+            ),
+        )
 
         return jnp.where(p > 0, result, p0_limit)

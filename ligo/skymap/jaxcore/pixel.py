@@ -15,12 +15,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
+from functools import partial
+
+import jax.numpy as jnp
 import numpy as np
 from jax import jit, vmap
-import jax.numpy as jnp
-from functools import partial
+
 from ligo.skymap.jaxcore.integrate import log_radial_integrator
-from ligo.skymap.jaxcore.moc import nu, ntwopsi, uniq2ang64, ang2vec, M_PI_2
+from ligo.skymap.jaxcore.moc import M_PI_2, ang2vec, ntwopsi, nu, uniq2ang64
 
 
 def extract_integrator_regions(integrators):
@@ -39,14 +41,28 @@ def extract_integrator_regions(integrators):
     """
     result = []
     for integrator in integrators:
-        result.append((
-            (integrator.region0.fx, integrator.region0.x0,
-             integrator.region0.xlength, integrator.region0.a),
-            (integrator.region1.f, integrator.region1.t0,
-             integrator.region1.length, integrator.region1.a),
-            (integrator.region2.f, integrator.region2.t0,
-             integrator.region2.length, integrator.region2.a),
-        ))
+        result.append(
+            (
+                (
+                    integrator.region0.fx,
+                    integrator.region0.x0,
+                    integrator.region0.xlength,
+                    integrator.region0.a,
+                ),
+                (
+                    integrator.region1.f,
+                    integrator.region1.t0,
+                    integrator.region1.length,
+                    integrator.region1.a,
+                ),
+                (
+                    integrator.region2.f,
+                    integrator.region2.t0,
+                    integrator.region2.length,
+                    integrator.region2.a,
+                ),
+            )
+        )
     return result
 
 
@@ -128,6 +144,7 @@ def antenna_factor(D, ra, dec, gmst):
         DX = D[i][0] * X[0] + D[i][1] * X[1] + D[i][2] * X[2]
         DY = D[i][0] * Y[0] + D[i][1] * Y[1] + D[i][2] * Y[2]
         return (X[i] * DX - Y[i] * DY) + (X[i] * DY + Y[i] * DX) * 1j
+
     F = jnp.sum(vmap(dxdy)(jnp.arange(3)))
     return F
 
@@ -158,8 +175,8 @@ def compute_F(responses, horizons, phi, theta, gmst):
     nifos = responses.shape[0]
 
     def body(i):
-        val = antenna_factor(
-            responses[i], phi, M_PI_2 - theta, gmst) * horizons[i]
+        val = antenna_factor(responses[i], phi, M_PI_2 - theta, gmst)
+        val *= horizons[i]
         return val
 
     return vmap(lambda i: body(i))(jnp.arange(nifos))
@@ -196,9 +213,18 @@ def toa_errors(theta, phi, gmst, locs, toas):
 
 @jit
 def catrom(x0, x1, x2, x3, t):
-    return x1 + t*(-0.5*x0 + 0.5*x2 +
-                   t*(x0 - 2.5*x1 + 2.0*x2 - 0.5*x3 +
-                      t*(-0.5*x0 + 1.5*x1 - 1.5*x2 + 0.5*x3)))
+    return x1 + t * (
+        -0.5 * x0
+        + 0.5 * x2
+        + t
+        * (
+            x0
+            - 2.5 * x1
+            + 2.0 * x2
+            - 0.5 * x3
+            + t * (-0.5 * x0 + 1.5 * x1 - 1.5 * x2 + 0.5 * x3)
+        )
+    )
 
 
 @jit
@@ -230,10 +256,8 @@ def eval_snr(x, nsamples, t):
     f = jnp.float32(t - jnp.floor(t))
     cond = jnp.logical_and(i >= 1, i < nsamples - 2)
 
-    mag = catrom(
-        x[i - 1][0], x[i][0], x[i + 1][0], x[i + 2][0], f)
-    phase = catrom(
-        x[i - 1][1], x[i][1], x[i + 1][1], x[i + 2][1], f)
+    mag = catrom(x[i - 1][0], x[i][0], x[i + 1][0], x[i + 2][0], f)
+    phase = catrom(x[i - 1][1], x[i][1], x[i + 1][1], x[i + 2][1], f)
 
     val = mag * exp_i(phase)
     return jnp.where(cond, val, jnp.complex64(0.0 + 0.0j))
@@ -313,21 +337,22 @@ def compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood):
     """
     u2 = u * u
 
-    z_times_r = vmap(lambda Fi: bayestar_signal_amplitude_model(
-        Fi, exp_i_twopsi, u, u2))(F)
-    p2 = jnp.sum(jnp.real(z_times_r)**2 + jnp.imag(z_times_r)**2)
+    z_times_r = vmap(
+        lambda Fi: bayestar_signal_amplitude_model(Fi, exp_i_twopsi, u, u2)
+    )(F)
+    p2 = jnp.sum(jnp.real(z_times_r) ** 2 + jnp.imag(z_times_r) ** 2)
     p2 *= 0.5 * rescale_loglikelihood**2
     p = jnp.sqrt(p2)
     logp = jnp.log(p)
 
-    b_vals, log_b_vals = vmap(lambda snr: compute_samplewise_b(
-        z_times_r, snr, rescale_loglikelihood))(snrs_interp)
+    b_vals, log_b_vals = vmap(
+        lambda snr: compute_samplewise_b(z_times_r, snr, rescale_loglikelihood)
+    )(snrs_interp)
     return p, logp, b_vals, log_b_vals
 
 
 @partial(jit, static_argnames=["ntwopsi"])
-def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi,
-                         rescale_loglikelihood):
+def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood):
     """
     Evaluate marginalized likelihood for all inclination angles at a fixed 2ψ.
 
@@ -354,8 +379,7 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi,
 
     def process_u(iu):
         u = u_points_weights[iu, 0]
-        return compute_u_point(F, exp_i_twopsi, u, snrs_interp,
-                               rescale_loglikelihood)
+        return compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood)
 
     return vmap(process_u)(jnp.arange(u_points_weights.shape[0]))
 
@@ -389,19 +413,46 @@ def compute_accum(iint, accum):
 
 
 @jit
-def safe_eval(integrator_tuple, integrator_b, itwopsi, iu, isample,
-              u_points_weights, p, b, log_p, log_b):
+def safe_eval(
+    integrator_tuple,
+    integrator_b,
+    itwopsi,
+    iu,
+    isample,
+    u_points_weights,
+    p,
+    b,
+    log_p,
+    log_b,
+):
     val = u_points_weights[iu][1] + log_radial_integrator.integrator_eval(
-        integrator_tuple[0], integrator_tuple[1], integrator_tuple[2],
-        integrator_b, p[itwopsi][iu], b[itwopsi][iu][isample],
-        log_p[itwopsi][iu], log_b[itwopsi][iu][isample])
+        integrator_tuple[0],
+        integrator_tuple[1],
+        integrator_tuple[2],
+        integrator_b,
+        p[itwopsi][iu],
+        b[itwopsi][iu][isample],
+        log_p[itwopsi][iu],
+        log_b[itwopsi][iu][isample],
+    )
     return jnp.where(jnp.isfinite(val), val, u_points_weights[iu][1])
 
 
 @jit
-def bsm_pixel_prob_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
-                       epochs, snrs, responses, locations, horizons,
-                       rescale_loglikelihood):
+def bsm_pixel_prob_jax(
+    integrators,
+    uniq,
+    px,
+    gmst,
+    nsamples,
+    sample_rate,
+    epochs,
+    snrs,
+    responses,
+    locations,
+    horizons,
+    rescale_loglikelihood,
+):
     """
     Compute likelihood integrals over inclination and polarization.
 
@@ -450,26 +501,38 @@ def bsm_pixel_prob_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(lambda isample:
-                       vmap(lambda x, tt:
-                            eval_snr(x, nsamples, tt))(
-                           snrs, isample - dt * sample_rate
-                           - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+    snrs_interp = vmap(
+        lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(
+            snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)
+        )
+    )(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(
-        F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))
-    (jnp.arange(ntwopsi))
+    p, log_p, b, log_b = vmap(
+        lambda itwopsi: compute_twopsi_slice(
+            F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
+        )
+    )(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = vmap(lambda itwopsi:
-                  vmap(lambda iu:
-                       vmap(lambda isample:
-                            safe_eval(integrators[0][0], integrators[1][0],
-                                      itwopsi, iu, isample,
-                                      u_points_weights, p, b, log_p, log_b))
-                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
-    (jnp.arange(ntwopsi))
+    accum0 = vmap(
+        lambda itwopsi: vmap(
+            lambda iu: vmap(
+                lambda isample: safe_eval(
+                    integrators[0][0],
+                    integrators[1][0],
+                    itwopsi,
+                    iu,
+                    isample,
+                    u_points_weights,
+                    p,
+                    b,
+                    log_p,
+                    log_b,
+                )
+            )(jnp.arange(snrs.shape[1]))
+        )(jnp.arange(nu))
+    )(jnp.arange(ntwopsi))
     accum = jnp.array([accum0])
 
     # Return updated pixel row
@@ -477,9 +540,20 @@ def bsm_pixel_prob_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
 
 
 @jit
-def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
-                       epochs, snrs, responses, locations, horizons,
-                       rescale_loglikelihood):
+def bsm_pixel_dist_jax(
+    integrators,
+    uniq,
+    px,
+    gmst,
+    nsamples,
+    sample_rate,
+    epochs,
+    snrs,
+    responses,
+    locations,
+    horizons,
+    rescale_loglikelihood,
+):
     """
     Compute likelihood integrals over inclination and polarization.
 
@@ -528,34 +602,56 @@ def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(lambda isample:
-                       vmap(lambda x, tt:
-                            eval_snr(x, nsamples, tt))(
-                           snrs, isample - dt * sample_rate
-                           - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+    snrs_interp = vmap(
+        lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(
+            snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)
+        )
+    )(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(
-        F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))
-    (jnp.arange(ntwopsi))
+    p, log_p, b, log_b = vmap(
+        lambda itwopsi: compute_twopsi_slice(
+            F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
+        )
+    )(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum1 = vmap(lambda itwopsi:
-                  vmap(lambda iu:
-                       vmap(lambda isample:
-                            safe_eval(integrators[0][1], integrators[1][1],
-                                      itwopsi, iu, isample,
-                                      u_points_weights, p, b, log_p, log_b))
-                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
-    (jnp.arange(ntwopsi))
-    accum2 = vmap(lambda itwopsi:
-                  vmap(lambda iu:
-                       vmap(lambda isample:
-                            safe_eval(integrators[0][2], integrators[1][2],
-                                      itwopsi, iu, isample,
-                                      u_points_weights, p, b, log_p, log_b))
-                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
-    (jnp.arange(ntwopsi))
+    accum1 = vmap(
+        lambda itwopsi: vmap(
+            lambda iu: vmap(
+                lambda isample: safe_eval(
+                    integrators[0][1],
+                    integrators[1][1],
+                    itwopsi,
+                    iu,
+                    isample,
+                    u_points_weights,
+                    p,
+                    b,
+                    log_p,
+                    log_b,
+                )
+            )(jnp.arange(snrs.shape[1]))
+        )(jnp.arange(nu))
+    )(jnp.arange(ntwopsi))
+    accum2 = vmap(
+        lambda itwopsi: vmap(
+            lambda iu: vmap(
+                lambda isample: safe_eval(
+                    integrators[0][2],
+                    integrators[1][2],
+                    itwopsi,
+                    iu,
+                    isample,
+                    u_points_weights,
+                    p,
+                    b,
+                    log_p,
+                    log_b,
+                )
+            )(jnp.arange(snrs.shape[1]))
+        )(jnp.arange(nu))
+    )(jnp.arange(ntwopsi))
     accum = jnp.array([accum1, accum2])
 
     # Return updated pixel row
@@ -565,9 +661,19 @@ def bsm_pixel_dist_jax(integrators, uniq, px, gmst, nsamples, sample_rate,
 
 
 @jit
-def bsm_pixel_accum_jax(integrators, uniq, gmst, nsamples, sample_rate, epochs,
-                        snrs, responses, locations, horizons,
-                        rescale_loglikelihood):
+def bsm_pixel_accum_jax(
+    integrators,
+    uniq,
+    gmst,
+    nsamples,
+    sample_rate,
+    epochs,
+    snrs,
+    responses,
+    locations,
+    horizons,
+    rescale_loglikelihood,
+):
     """
     Compute likelihood integrals over inclination and polarization.
 
@@ -619,26 +725,38 @@ def bsm_pixel_accum_jax(integrators, uniq, gmst, nsamples, sample_rate, epochs,
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(lambda isample:
-                       vmap(lambda x, tt:
-                            eval_snr(x, nsamples, tt))(
-                           snrs, isample - dt * sample_rate
-                           - 0.5 * (nsamples - 1)))(jnp.arange(snrs.shape[1]))
+    snrs_interp = vmap(
+        lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(
+            snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)
+        )
+    )(jnp.arange(snrs.shape[1]))
 
     # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(lambda itwopsi: compute_twopsi_slice(
-        F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood))
-    (jnp.arange(ntwopsi))
+    p, log_p, b, log_b = vmap(
+        lambda itwopsi: compute_twopsi_slice(
+            F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
+        )
+    )(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = vmap(lambda itwopsi:
-                  vmap(lambda iu:
-                       vmap(lambda isample:
-                            safe_eval(integrators[0][0], integrators[1][0],
-                                      itwopsi, iu, isample,
-                                      u_points_weights, p, b, log_p, log_b))
-                       (jnp.arange(snrs.shape[1])))(jnp.arange(nu)))
-    (jnp.arange(ntwopsi))
+    accum0 = vmap(
+        lambda itwopsi: vmap(
+            lambda iu: vmap(
+                lambda isample: safe_eval(
+                    integrators[0][0],
+                    integrators[1][0],
+                    itwopsi,
+                    iu,
+                    isample,
+                    u_points_weights,
+                    p,
+                    b,
+                    log_p,
+                    log_b,
+                )
+            )(jnp.arange(snrs.shape[1]))
+        )(jnp.arange(nu))
+    )(jnp.arange(ntwopsi))
     accum = jnp.array([accum0])
 
     # Return updated accum value
