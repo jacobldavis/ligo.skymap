@@ -44,7 +44,7 @@ from ..core import log_posterior_toa_phoa_snr as _log_posterior_toa_phoa_snr
 from ..io.events.base import Event
 from ..io.fits import metadata_for_version_module
 from ..io.hdf5 import write_samples
-from ..jaxcore.local import bsm_jax
+from ..jaxcore.local import _MAX_NIFOS, _MAX_NSAMPLES, bsm_jax
 from ..kde import Clustered2Plus1DSkyKDE
 from ..util.numpy import require_contiguous_aligned
 from ..util.stopwatch import Stopwatch
@@ -484,22 +484,26 @@ def localize(
         )
     else:
         if enable_jax:
-            compilea, compileb, compilec = bsm_jax(
-                min_distance,
-                max_distance,
-                prior_distance_power,
-                cosmology,
-                gmst,
-                len(toas),
-                snrs[0].shape[0],
-                sample_rate,
-                toas,
-                snrs,
-                responses,
-                locations,
-                horizons,
-                rescale_loglikelihood,
-            )
+            # Add padding to use the compiled function
+            nifos = len(toas)
+            nsamples = snrs.shape[1]
+
+            snrs_padded = np.zeros((_MAX_NIFOS, _MAX_NSAMPLES, 2), dtype=np.float32)
+            snrs_padded[:nifos, :nsamples, :] = snrs
+
+            epochs_padded = np.zeros((_MAX_NIFOS,), dtype=np.float32)
+            epochs_padded[:nifos] = toas
+
+            responses_padded = np.zeros((_MAX_NIFOS, 3, 3), dtype=np.float32)
+            responses_padded[:nifos] = responses
+
+            locations_padded = np.zeros((_MAX_NIFOS, 3), dtype=np.float32)
+            locations_padded[:nifos] = locations
+
+            horizons_padded = np.zeros((_MAX_NIFOS,), dtype=np.float32)
+            horizons_padded[:nifos] = horizons
+
+            # Perform sky map calculation
             start = time.perf_counter()
             skymap, log_bci, log_bsn = bsm_jax(
                 min_distance,
@@ -507,14 +511,14 @@ def localize(
                 prior_distance_power,
                 cosmology,
                 gmst,
-                len(toas),
-                snrs[0].shape[0],
+                nifos,
+                nsamples,
                 sample_rate,
-                toas,
-                snrs,
-                responses,
-                locations,
-                horizons,
+                epochs_padded,
+                snrs_padded,
+                responses_padded,
+                locations_padded,
+                horizons_padded,
                 rescale_loglikelihood,
             )
             end = time.perf_counter()
@@ -545,6 +549,7 @@ def localize(
 
         # Create the table
         skymap = Table(skymap, copy=False)
+        print(skymap)
 
         skymap.meta["log_bci"] = log_bci
         skymap.meta["log_bsn"] = log_bsn

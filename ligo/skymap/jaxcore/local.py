@@ -18,6 +18,7 @@
 from functools import partial
 
 import jax.numpy as jnp
+import numpy as np
 from jax import jit, lax, vmap
 
 from .moc import (
@@ -36,6 +37,9 @@ from .pixel import (
     extract_integrator_regions,
     log_radial_integrator,
 )
+
+_MAX_NIFOS = 5
+_MAX_NSAMPLES = 1000
 
 
 @jit
@@ -176,7 +180,7 @@ def bayestar_pixels_sort_uniq(pixels):
     return pixels[sorted_indices]
 
 
-@partial(jit, static_argnames=["nifos"])
+@jit
 def bsm_jax(
     min_distance,
     max_distance,
@@ -267,7 +271,7 @@ def bsm_jax(
     # Compute the coherent probability map
     # and incoherent evidence at the lowest order
     i = integrators
-    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * nsamples)
+    log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * snrs.shape[1])
     log_norm -= log_radial_integrator.integrator_eval(
         regions[0][0],
         regions[0][1],
@@ -278,7 +282,7 @@ def bsm_jax(
         -jnp.inf,
         -jnp.inf,
     )
-    accum = jnp.zeros((npix0, nifos))
+    accum = jnp.zeros((npix0, epochs.shape[0]))
 
     def update_pixel_row(px_row):
         return bsm_pixel_prob_jax(
@@ -320,7 +324,7 @@ def bsm_jax(
         pixels = pixels.at[:].set(pixels_new_rows)
 
         def update_incoherent(px):
-            return vmap(lambda i: update_acc_row(px, i))(jnp.arange(nifos))
+            return vmap(lambda i: update_acc_row(px, i))(jnp.arange(epochs.shape[0]))
 
         accum = lax.map(update_incoherent, pixels, batch_size=bs)
 
@@ -404,6 +408,26 @@ def bsm_jax(
 
     # Calculate log Bayes factor and return
     log_bci = log_bsn = log_evidence_coherent
-    log_bci -= jnp.sum(vmap(lambda i: log_evidence_incoherent[i])(jnp.arange(nifos)))
+    log_bci -= jnp.sum(
+        vmap(lambda i: log_evidence_incoherent[i])(jnp.arange(epochs.shape[0]))
+    )
 
     return pixels, log_bci, log_bsn
+
+
+compile_a, compile_b, compile_c = bsm_jax(
+    0,
+    np.array(1000.0, dtype=np.float64),
+    1,
+    False,
+    1.0,
+    _MAX_NIFOS,
+    _MAX_NSAMPLES,
+    1.0,
+    np.ones((_MAX_NIFOS), dtype=np.float32),
+    np.ones((_MAX_NIFOS, _MAX_NSAMPLES, 2), dtype=np.float32),
+    np.ones((_MAX_NIFOS, 3, 3), dtype=np.float32),
+    np.ones((_MAX_NIFOS, 3), dtype=np.float32),
+    np.ones((_MAX_NIFOS,), dtype=np.float32),
+    1.0,
+)
