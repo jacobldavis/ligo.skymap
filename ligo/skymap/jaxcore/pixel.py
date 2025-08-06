@@ -150,7 +150,7 @@ def antenna_factor(D, ra, dec, gmst):
 
 
 @jit
-def compute_F(responses, horizons, phi, theta, gmst):
+def compute_F(responses, horizons, phi, theta, gmst, nifos):
     """
     Compute the complex antenna response F for each interferometer.
 
@@ -172,14 +172,13 @@ def compute_F(responses, horizons, phi, theta, gmst):
     array
         Complex response factors for each detector.
     """
-    nifos = responses.shape[0]
 
     def body(i):
         val = antenna_factor(responses[i], phi, M_PI_2 - theta, gmst)
         val *= horizons[i]
-        return val
+        return jnp.where(i < nifos, val, 0)
 
-    return vmap(lambda i: body(i))(jnp.arange(nifos))
+    return vmap(lambda i: body(i))(jnp.arange(responses.shape[0]))
 
 
 @jit
@@ -444,6 +443,7 @@ def bsm_pixel_prob_jax(
     uniq,
     px,
     gmst,
+    nifos,
     nsamples,
     sample_rate,
     epochs,
@@ -470,6 +470,8 @@ def bsm_pixel_prob_jax(
         Greenwich Mean Sidereal Time.
     nsamples : int
         Number of SNR time samples.
+    nifos : int
+        Number of detectors.
     sample_rate : float
         Sampling rate in Hz.
     epochs : array_like
@@ -495,7 +497,7 @@ def bsm_pixel_prob_jax(
     theta, phi = uniq2ang64(uniq)
 
     # Look up antenna factors
-    F = compute_F(responses, horizons, phi, theta, gmst)
+    F = compute_F(responses, horizons, phi, theta, gmst, nifos)
 
     # Compute dt
     dt = toa_errors(theta, phi, gmst, locations, epochs)
@@ -545,6 +547,7 @@ def bsm_pixel_dist_jax(
     uniq,
     px,
     gmst,
+    nifos,
     nsamples,
     sample_rate,
     epochs,
@@ -569,6 +572,8 @@ def bsm_pixel_dist_jax(
         Pixel row to modify.
     gmst : float
         Greenwich Mean Sidereal Time.
+    nifos : int
+        Number of detectors.
     nsamples : int
         Number of SNR time samples.
     sample_rate : float
@@ -596,7 +601,7 @@ def bsm_pixel_dist_jax(
     theta, phi = uniq2ang64(uniq)
 
     # Look up antenna factors
-    F = compute_F(responses, horizons, phi, theta, gmst)
+    F = compute_F(responses, horizons, phi, theta, gmst, nifos)
 
     # Compute dt
     dt = toa_errors(theta, phi, gmst, locations, epochs)
@@ -665,6 +670,7 @@ def bsm_pixel_accum_jax(
     integrators,
     uniq,
     gmst,
+    nifos,
     nsamples,
     sample_rate,
     epochs,
@@ -692,7 +698,7 @@ def bsm_pixel_accum_jax(
     gmst : float
         Greenwich Mean Sidereal Time.
     nifos : int
-        Number of interferometers.
+        Number of detectors.
     nsamples : int
         Number of SNR time samples.
     sample_rate : float
@@ -719,7 +725,7 @@ def bsm_pixel_accum_jax(
     theta, phi = uniq2ang64(uniq)
 
     # Look up antenna factors
-    F = compute_F(responses, horizons, phi, theta, gmst)
+    F = compute_F(responses, horizons, phi, theta, gmst, nifos)
 
     # Compute dt
     dt = toa_errors(theta, phi, gmst, locations, epochs)

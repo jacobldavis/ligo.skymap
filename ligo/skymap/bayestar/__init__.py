@@ -29,7 +29,6 @@ import inspect
 import logging
 import os
 import sys
-import time
 from textwrap import wrap
 
 import lal
@@ -504,7 +503,6 @@ def localize(
             horizons_padded[:nifos] = horizons
 
             # Perform sky map calculation
-            start = time.perf_counter()
             skymap, log_bci, log_bsn = bsm_jax(
                 min_distance,
                 max_distance,
@@ -521,8 +519,6 @@ def localize(
                 horizons_padded,
                 rescale_loglikelihood,
             )
-            end = time.perf_counter()
-            print(f"TIME: {end - start}")
 
             # Handle NumPy conversion from JAX
             skymap = np.asarray(skymap)

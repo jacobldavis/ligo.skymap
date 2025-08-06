@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jit, lax, vmap
 
-from .moc import (
+from ligo.skymap.jaxcore.moc import (
     M_LN2,
     default_log_radial_integrator_size,
     nest2uniq64,
@@ -29,7 +29,7 @@ from .moc import (
     uniq2order64,
     uniq2pixarea64,
 )
-from .pixel import (
+from ligo.skymap.jaxcore.pixel import (
     bsm_pixel_accum_jax,
     bsm_pixel_dist_jax,
     bsm_pixel_prob_jax,
@@ -290,6 +290,7 @@ def bsm_jax(
             px_row[0],
             px_row,
             gmst,
+            nifos,
             nsamples,
             sample_rate,
             epochs,
@@ -305,6 +306,7 @@ def bsm_jax(
             integrators_values,
             px_row[0],
             gmst,
+            nifos,
             nsamples,
             sample_rate,
             lax.dynamic_slice(epochs, (iifo,), (1,)),
@@ -365,6 +367,7 @@ def bsm_jax(
             px[0],
             px,
             gmst,
+            nifos,
             nsamples,
             sample_rate,
             epochs,
