@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013-2024  Leo Singer, Rainer Corley
+# Copyright (C) 2013-2025  Leo Singer, Rainer Corley
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,9 +19,10 @@
 All functions in this module use the Planck15 cosmological parameters.
 """
 
-import numpy as np
-from astropy.cosmology import Planck15 as cosmo, z_at_value
 import astropy.units as u
+import numpy as np
+from astropy.cosmology import Planck15 as cosmo
+from astropy.cosmology import z_at_value
 
 
 def dDL_dz_for_z(z):
@@ -79,7 +80,8 @@ def dVC_dVL_for_z(z):
 def z_for_DL(DL):
     """Redshift as a function of luminosity distance in Mpc."""
     return z_at_value(cosmo.luminosity_distance, DL * u.Mpc).to_value(
-        u.dimensionless_unscaled)
+        u.dimensionless_unscaled
+    )
 
 
 def dVC_dVL_for_DL(DL):

@@ -2,10 +2,18 @@
 Changelog
 #########
 
-2.4.1 (unreleased)
-==================
+2.4.1rc1 (2025-08-04)
+=====================
 
 - Require scipy >= 1.10.1.
+
+- Fix centering of WCS axes plots using SkyCoord instances in frames that are
+  different from the WCS axes' frame (for example, supplying a center in ICRS
+  coordinates when the WCS axes are in Galactic coordinates).
+  Fixes `GitHub issue #32`__. Thanks to `@nicholasjannsen`__ for reporting!
+
+  __ https://github.com/lpsinger/ligo.skymap/issues/32
+  __ https://github.com/nicholasjannsen
 
 2.4.0 (2025-05-22)
 ==================
@@ -23,8 +31,8 @@ Changelog
 - Run unit tests for Python 3.11 through 3.13.
 
 - Annotate instruments in ``ligo-skymap-plot`` and ``ligo-skymap-plot-volume``
-  if ``--annotate`` flag is specified and the input FITS file metadata 
-  contains the ``INSTRUME`` field.
+  if ``--annotate`` flag is specified and the input FITS file metadata contains
+  the ``INSTRUME`` field.
 
 2.3.0 (2025-04-26)
 ==================

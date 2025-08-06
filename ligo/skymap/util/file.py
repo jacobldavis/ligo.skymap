@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2019  Leo Singer
+# Copyright (C) 2018-2025  Leo Singer
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 """File tools."""
+
 import errno
 import os
 import shutil

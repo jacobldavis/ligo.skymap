@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2024  Leo Singer
+# Copyright (C) 2024-2025  Leo Singer
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,7 +16,7 @@
 #
 """Math utilities."""
 
-__all__ = ('derivative',)
+__all__ = ("derivative",)
 
 
 def derivative(func, x0, dx=1.0):

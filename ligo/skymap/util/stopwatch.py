@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020  Leo Singer
+# Copyright (C) 2020-2025  Leo Singer
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,14 +15,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 """Performance measurement utilities."""
-from resource import getrusage, RUSAGE_SELF
+
+from resource import RUSAGE_SELF, getrusage
 from time import perf_counter
 
 import numpy as np
 
 
 class StopwatchTimes:
-
     def __init__(self, real=0, user=0, sys=0):
         self.real = real
         self.user = user
@@ -41,22 +41,24 @@ class StopwatchTimes:
         return self
 
     def __add__(self, other):
-        return StopwatchTimes(self.real + other.real,
-                              self.user + other.user,
-                              self.sys + other.sys)
+        return StopwatchTimes(
+            self.real + other.real, self.user + other.user, self.sys + other.sys
+        )
 
     def __sub__(self, other):
-        return StopwatchTimes(self.real - other.real,
-                              self.user - other.user,
-                              self.sys - other.sys)
+        return StopwatchTimes(
+            self.real - other.real, self.user - other.user, self.sys - other.sys
+        )
 
     def __repr__(self):
-        return f'{self.__class__.__name__}(real={self.real!r}, user={self.user!r}, sys={self.sys!r})'  # noqa: E501
+        return f"{self.__class__.__name__}(real={self.real!r}, user={self.user!r}, sys={self.sys!r})"  # noqa: E501
 
     def __str__(self):
-        real, user, sys = (np.format_float_positional(val, 3, unique=False)
-                           for val in (self.real, self.user, self.sys))
-        return f'real={real}s, user={user}s, sys={sys}s'
+        real, user, sys = (
+            np.format_float_positional(val, 3, unique=False)
+            for val in (self.real, self.user, self.sys)
+        )
+        return f"real={real}s, user={user}s, sys={sys}s"
 
     @classmethod
     def now(cls):
