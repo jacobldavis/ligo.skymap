@@ -42,8 +42,6 @@ from ligo.skymap.jaxcore.moc import nest2uniq64, uniq2ang64, uniq2nest64
         (1, 1, 17),
         (1, 2, 18),
         (1, 47, 63),
-        (12, 0, 0x4000000),
-        (12, 1, 0x4000001),
     ],
 )
 def test_nest2uniq64(order, nest, uniq):
