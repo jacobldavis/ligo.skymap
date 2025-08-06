@@ -16,9 +16,10 @@
 #
 
 import jax.numpy as jnp
-from jax import vmap
 import pytest  # type: ignore
-from ligo.skymap.jaxcore.interp import cubic_interp, bicubic_interp
+from jax import vmap
+
+from ligo.skymap.jaxcore.interp import bicubic_interp, cubic_interp
 
 # --- TEST SUITE ---
 
@@ -26,34 +27,38 @@ from ligo.skymap.jaxcore.interp import cubic_interp, bicubic_interp
 def test_cubic_interp_zero_output():
     t = jnp.arange(-10.0, 10.0 + 0.01, 0.01)
     test = cubic_interp(jnp.array([0, 0, 0, 0]), 4, -1, 1)
-    result = test.cubic_interp_eval_jax(
-        t, test.f, test.t0, test.length, test.a)
+    result = test.cubic_interp_eval_jax(t, test.f, test.t0, test.length, test.a)
     assert jnp.allclose(result, 0)
 
 
 def test_cubic_interp_quadratic():
     t = jnp.arange(0, 2 + 0.01, 0.01)
     test = cubic_interp(jnp.array([1, 0, 1, 4]), 4, -1, 1)
-    result = test.cubic_interp_eval_jax(
-        t, test.f, test.t0, test.length, test.a)
+    result = test.cubic_interp_eval_jax(t, test.f, test.t0, test.length, test.a)
 
     assert jnp.isfinite(result).all()
-    assert result[0] == pytest.approx(1, abs=1e-2)
+    assert result[0] == pytest.approx(0, abs=1e-2)
     assert result[-1] == pytest.approx(4, abs=1e-2)
 
 
 def test_bicubic_interp_flat_plane():
     s = jnp.arange(0, 2 + 0.01, 0.01)
     t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = bicubic_interp(jnp.array([
-        -1, -1, -1, -1,
-        0, 0, 0, 0,
-        1, 1, 1, 1,
-        2, 2, 2, 2
-    ]), 4, 4, -1, -1, 1, 1)
+    test = bicubic_interp(
+        jnp.array([-1, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]),
+        4,
+        4,
+        -1,
+        -1,
+        1,
+        1,
+    )
 
-    result = vmap(lambda ss, tt: test.bicubic_interp_eval_jax(
-        ss, tt, test.fx, test.x0, test.xlength, test.a))(s, t)
+    result = vmap(
+        lambda ss, tt: test.bicubic_interp_eval_jax(
+            ss, tt, test.fx, test.x0, test.xlength, test.a
+        )
+    )(s, t)
     assert jnp.isfinite(result).all()
     assert result[0] == pytest.approx(0, abs=1e-2)
     assert result[-1] == pytest.approx(2, abs=1e-2)
@@ -62,15 +67,21 @@ def test_bicubic_interp_flat_plane():
 def test_bicubic_interp_ramp():
     s = jnp.arange(0, 2 + 0.01, 0.01)
     t = jnp.arange(0, 2 + 0.01, 0.01)
-    test = bicubic_interp(jnp.array([
-        -1, -1, -1, -1,
-        0, 0, 0, 0,
-        1, 1, 1, 1,
-        8, 8, 8, 8
-    ]), 4, 4, -1, -1, 1, 1)
+    test = bicubic_interp(
+        jnp.array([-1, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 8, 8, 8, 8]),
+        4,
+        4,
+        -1,
+        -1,
+        1,
+        1,
+    )
 
-    result = vmap(lambda ss, tt: test.bicubic_interp_eval_jax(
-        ss, tt, test.fx, test.x0, test.xlength, test.a))(s, t)
+    result = vmap(
+        lambda ss, tt: test.bicubic_interp_eval_jax(
+            ss, tt, test.fx, test.x0, test.xlength, test.a
+        )
+    )(s, t)
     assert jnp.isfinite(result).all()
     assert result[0] == pytest.approx(0, abs=1e-2)
     assert result[-1] == pytest.approx(8, abs=1e-1)
