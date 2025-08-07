@@ -15,8 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from jax import jit
 import jax.numpy as jnp
+from jax import jit
 
 default_log_radial_integrator_size = 400
 M_PI_2 = jnp.pi / 2
@@ -134,14 +134,16 @@ def build_ctab():
     list
         Lookup table used to compress 64-bit values to HEALPix xy-faces.
     """
+
     def Z(a):
-        return jnp.array([a, a+1, a+256, a+257])
+        return jnp.array([a, a + 1, a + 256, a + 257])
 
     def Y(a):
-        return jnp.concatenate([Z(a), Z(a+2), Z(a+512), Z(a+514)])
+        return jnp.concatenate([Z(a), Z(a + 2), Z(a + 512), Z(a + 514)])
 
     def X(a):
-        return jnp.concatenate([Y(a), Y(a+4), Y(a+1024), Y(a+1028)])
+        return jnp.concatenate([Y(a), Y(a + 4), Y(a + 1024), Y(a + 1028)])
+
     return jnp.concatenate([X(0), X(8), X(2048), X(2056)])
 
 
@@ -195,10 +197,10 @@ def compress_bits64(v, ctab):
     raw_high |= raw_high >> jnp.uint32(15)
 
     # Combine results
-    b0 = ctab[raw_low & 0xff]
-    b1 = ctab[(raw_low >> 8) & 0xff] << 4
-    b2 = ctab[raw_high & 0xff] << 16
-    b3 = ctab[(raw_high >> 8) & 0xff] << 20
+    b0 = ctab[raw_low & 0xFF]
+    b1 = ctab[(raw_low >> 8) & 0xFF] << 4
+    b2 = ctab[raw_high & 0xFF] << 16
+    b3 = ctab[(raw_high >> 8) & 0xFF] << 20
     return b0 | b1 | b2 | b3
 
 
@@ -270,17 +272,17 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
         jnp.where(
             jr > 3 * nside,
             (((nl4 - jr) ** 2) * fact2) - 1.0,
-            (2 * nside - jr) * (2 * nside * fact2)
-        )
+            (2 * nside - jr) * (2 * nside * fact2),
+        ),
     )
 
     tmp = jnp.where(jr < nside, jr * jr * fact2, ((nl4 - jr) ** 2) * fact2)
     valid_tmp = tmp * (2.0 - tmp)
     s = jnp.where((z > 0.99) | (z < -0.99), jnp.sqrt(valid_tmp), -5.0)
 
-    nr = jnp.where((jr < nside) | (jr > 3 * nside),
-                   jnp.where(jr < nside, jr, nl4 - jr),
-                   nside)
+    nr = jnp.where(
+        (jr < nside) | (jr > 3 * nside), jnp.where(jr < nside, jr, nl4 - jr), nside
+    )
 
     kshift = jnp.where((jr >= nside) & (jr <= 3 * nside), (jr - nside) & 1, 0)
 
@@ -346,6 +348,6 @@ def uniq2ang64(uniq):
     """
     order, nest = uniq2nest64(uniq)
     valid = order >= 0
-    nside = 2 ** order
+    nside = 2**order
     theta, phi = pix2ang_nest64(nside, nest, ctab, jrll, jpll)
     return jnp.where(valid, theta, 0.0), jnp.where(valid, phi, 0.0)

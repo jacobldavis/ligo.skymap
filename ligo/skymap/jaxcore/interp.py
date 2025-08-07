@@ -14,9 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-from jax import jit, vmap
-import jax.numpy as jnp
 from functools import partial
+
+import jax.numpy as jnp
+from jax import jit, vmap
+
 ARANGE4 = jnp.arange(4)
 SQRT_2 = jnp.sqrt(2)
 ETA = 0.01
@@ -59,8 +61,7 @@ class cubic_interp:
         self.f = 1 / dt
         self.t0 = 3 - self.f * tmin
         self.length = n + 6
-        self.a = vmap(lambda idx: self.compute_coeffs(
-            idx, data, n))(jnp.arange(n + 6))
+        self.a = vmap(lambda idx: self.compute_coeffs(idx, data, n))(jnp.arange(n + 6))
 
     @staticmethod
     @jit
@@ -82,12 +83,14 @@ class cubic_interp:
             Array of cubic coefficients, shape (4).
         """
         # Clip indices and build z
-        z = jnp.array([
-            data[jnp.clip(idx - 4, 0, n - 1)],
-            data[jnp.clip(idx - 3, 0, n - 1)],
-            data[jnp.clip(idx - 2, 0, n - 1)],
-            data[jnp.clip(idx - 1, 0, n - 1)],
-        ])
+        z = jnp.array(
+            [
+                data[jnp.clip(idx - 4, 0, n - 1)],
+                data[jnp.clip(idx - 3, 0, n - 1)],
+                data[jnp.clip(idx - 2, 0, n - 1)],
+                data[jnp.clip(idx - 1, 0, n - 1)],
+            ]
+        )
         bad12 = nan_or_inf(z[1] + z[2])
         bad03 = nan_or_inf(z[0] + z[3])
 
@@ -98,12 +101,14 @@ class cubic_interp:
         a3 = z[1]
 
         # Initialize coefficients
-        return jnp.array([
-            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
-            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
-            jnp.where(bad12, 0.0, jnp.where(bad03, z[2]-z[1], a2)),
-            jnp.where(bad12, z[1], jnp.where(bad03, z[1], a3))
-        ])
+        return jnp.array(
+            [
+                jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
+                jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
+                jnp.where(bad12, 0.0, jnp.where(bad03, z[2] - z[1], a2)),
+                jnp.where(bad12, z[1], jnp.where(bad03, z[1], a3)),
+            ]
+        )
 
     @staticmethod
     @jit
@@ -137,15 +142,17 @@ class cubic_interp:
         a2 = a[ix, 2]
         a3 = a[ix, 3]
 
-        return (x * (x * (x * a0 + a1) + a2) + a3)
+        return x * (x * (x * a0 + a1) + a2) + a3
+
 
 # --- BICUBIC INTERP ---
 
 
 @jit
 def cubic_eval(coeffs, x):
-    return ((coeffs[..., 0] * x + coeffs[..., 1])
-            * x + coeffs[..., 2]) * x + coeffs[..., 3]
+    return ((coeffs[..., 0] * x + coeffs[..., 1]) * x + coeffs[..., 2]) * x + coeffs[
+        ..., 3
+    ]
 
 
 @jit
@@ -172,15 +179,17 @@ def interpolate_1d(z):
     a3 = z[1]
 
     # Initialize coefficients
-    return jnp.stack([
-        jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
-        jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
-        jnp.where(bad12, 0.0, jnp.where(bad03, z[2]-z[1], a2)),
-        jnp.where(bad12, z[1], a3)
-    ])
+    return jnp.stack(
+        [
+            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
+            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
+            jnp.where(bad12, 0.0, jnp.where(bad03, z[2] - z[1], a2)),
+            jnp.where(bad12, z[1], a3),
+        ]
+    )
 
 
-@partial(jit, static_argnames=['ns', 'nt'])
+@partial(jit, static_argnames=["ns", "nt"])
 def compute_coeffs(data, ns, nt):
     """Compute bicubic interpolation coefficients from 2D gridded data.
 
@@ -214,8 +223,9 @@ def compute_coeffs(data, ns, nt):
         a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(ARANGE4)
         return vmap(interpolate_1d)(a_rows.T)
 
-    blocks = vmap(lambda iss: vmap(lambda itt: compute_block(iss, itt))(
-        jnp.arange(length_t)))(jnp.arange(length_s))
+    blocks = vmap(
+        lambda iss: vmap(lambda itt: compute_block(iss, itt))(jnp.arange(length_t))
+    )(jnp.arange(length_s))
     return blocks.reshape(length_s * length_t, 4, 4)
 
 
@@ -246,7 +256,7 @@ class bicubic_interp:
     """
 
     def __init__(self, data, ns, nt, smin, tmin, ds, dt):
-        self.fx = jnp.array([1/ds, 1/dt])
+        self.fx = jnp.array([1 / ds, 1 / dt])
         self.x0 = jnp.array([3 - self.fx[0] * smin, 3 - self.fx[1] * tmin])
         self.xlength = jnp.array([ns + 6, nt + 6])
         self.a = compute_coeffs(data, ns, nt)
