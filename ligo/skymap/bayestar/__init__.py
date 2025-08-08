@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2013-2024  Leo Singer
+# Copyright (C) 2013-2025  Leo Singer
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -47,7 +47,7 @@ from ..jaxcore.local import _MAX_NIFOS, _MAX_NSAMPLES, bsm_jax
 from ..kde import Clustered2Plus1DSkyKDE
 from ..util.numpy import require_contiguous_aligned
 from ..util.stopwatch import Stopwatch
-from . import filter  # noqa
+from . import filter
 from .ez_emcee import ez_emcee
 
 __all__ = (
@@ -481,67 +481,72 @@ def localize(
             xmax=[2 * np.pi, 1, max_distance, 1, 2 * np.pi, 2 * max_abs_t],
             chain_dump=chain_dump,
         )
+    elif enable_jax:
+        # Add padding to use the compiled function
+        nifos = len(toas)
+        nsamples = snrs.shape[1]
+
+        snrs_padded = np.zeros((_MAX_NIFOS, _MAX_NSAMPLES, 2), dtype=np.float32)
+        snrs_padded[:nifos, :nsamples, :] = snrs
+
+        epochs_padded = np.zeros((_MAX_NIFOS,), dtype=np.float32)
+        epochs_padded[:nifos] = toas
+
+        responses_padded = np.zeros((_MAX_NIFOS, 3, 3), dtype=np.float32)
+        responses_padded[:nifos] = responses
+
+        locations_padded = np.zeros((_MAX_NIFOS, 3), dtype=np.float32)
+        locations_padded[:nifos] = locations
+
+        horizons_padded = np.zeros((_MAX_NIFOS,), dtype=np.float32)
+        horizons_padded[:nifos] = horizons
+
+        # Perform sky map calculation
+        skymap, log_bci, log_bsn = bsm_jax(
+            min_distance,
+            max_distance,
+            prior_distance_power,
+            cosmology,
+            gmst,
+            nifos,
+            nsamples,
+            sample_rate,
+            epochs_padded,
+            snrs_padded,
+            responses_padded,
+            locations_padded,
+            horizons_padded,
+            rescale_loglikelihood,
+        )
+
+        # Handle NumPy conversion from JAX
+        skymap = np.asarray(skymap)
+        log_bci, log_bsn = float(log_bci), float(log_bsn)
+        dtype = [
+            ("UNIQ", "i8"),
+            ("PROBDENSITY", "f8"),
+            ("DISTMEAN", "f8"),
+            ("DISTSTD", "f8"),
+        ]
+        structured = np.zeros(len(skymap), dtype=dtype)
+
+        uniq = skymap[:, 0].astype(np.int64)
+        probdensity = skymap[:, 1]
+        distmean = skymap[:, 2]
+        diststd = skymap[:, 3]
+        structured["UNIQ"] = uniq
+        structured["PROBDENSITY"] = probdensity
+        structured["DISTMEAN"] = distmean
+        structured["DISTSTD"] = diststd
+        skymap = structured
+
+        # Create the table
+        skymap = Table(skymap, copy=False)
+
+        skymap.meta["log_bci"] = log_bci
+        skymap.meta["log_bsn"] = log_bsn
     else:
-        if enable_jax:
-            # Add padding to use the compiled function
-            nifos = len(toas)
-            nsamples = snrs.shape[1]
-
-            snrs_padded = np.zeros((_MAX_NIFOS, _MAX_NSAMPLES, 2), dtype=np.float32)
-            snrs_padded[:nifos, :nsamples, :] = snrs
-
-            epochs_padded = np.zeros((_MAX_NIFOS,), dtype=np.float32)
-            epochs_padded[:nifos] = toas
-
-            responses_padded = np.zeros((_MAX_NIFOS, 3, 3), dtype=np.float32)
-            responses_padded[:nifos] = responses
-
-            locations_padded = np.zeros((_MAX_NIFOS, 3), dtype=np.float32)
-            locations_padded[:nifos] = locations
-
-            horizons_padded = np.zeros((_MAX_NIFOS,), dtype=np.float32)
-            horizons_padded[:nifos] = horizons
-
-            # Perform sky map calculation
-            skymap, log_bci, log_bsn = bsm_jax(
-                min_distance,
-                max_distance,
-                prior_distance_power,
-                cosmology,
-                gmst,
-                nifos,
-                nsamples,
-                sample_rate,
-                epochs_padded,
-                snrs_padded,
-                responses_padded,
-                locations_padded,
-                horizons_padded,
-                rescale_loglikelihood,
-            )
-
-            # Handle NumPy conversion from JAX
-            skymap = np.asarray(skymap)
-            log_bci, log_bsn = float(log_bci), float(log_bsn)
-            dtype = [
-                ("UNIQ", "i8"),
-                ("PROBDENSITY", "f8"),
-                ("DISTMEAN", "f8"),
-                ("DISTSTD", "f8"),
-            ]
-            structured = np.zeros(len(skymap), dtype=dtype)
-
-            uniq = skymap[:, 0].astype(np.int64)
-            probdensity = skymap[:, 1]
-            distmean = skymap[:, 2]
-            diststd = skymap[:, 3]
-            structured["UNIQ"] = uniq
-            structured["PROBDENSITY"] = probdensity
-            structured["DISTMEAN"] = distmean
-            structured["DISTSTD"] = diststd
-            skymap = structured
-        else:
-            skymap, log_bci, log_bsn = core.toa_phoa_snr(*args)
+        skymap, log_bci, log_bsn = core.toa_phoa_snr(*args)
 
         # Create the table
         skymap = Table(skymap, copy=False)

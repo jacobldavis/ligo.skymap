@@ -84,6 +84,8 @@ You are now ready to get started using `ligo.skymap`.
           *  `Shapely <https://shapely.readthedocs.io/>`_ ≥ 2.0.0
           *  `tqdm <https://tqdm.github.io>`_ ≥ 4.27.0
           *  `pytz <http://pytz.sourceforge.net>`_
+          *  `jax <https://docs.jax.dev/en/latest/>`_ ≥ 0.4.38
+          *  `quadax <https://quadax.readthedocs.io/en/latest/>`_ ≥ 0.2.8
 
           The following packages are optional for specific features.
 
@@ -105,6 +107,10 @@ You are now ready to get started using `ligo.skymap`.
           *  `sphinx-astropy <https://github.com/astropy/sphinx-astropy>`_
           *  `sphinxcontrib-mermaid <https://github.com/mgaitan/sphinxcontrib-mermaid>`_ ≥ 0.7.1
           *  `tomli <https://github.com/hukkin/tomli>`_ ≥ 1.1.0
+
+          For using CUDA with the JAX implementation of BAYESTAR:
+
+          *  `jax[cuda12] <https://docs.jax.dev/en/latest/>`_ ≥ 0.4.38
 
 Optional LALSimulation Data
 ---------------------------

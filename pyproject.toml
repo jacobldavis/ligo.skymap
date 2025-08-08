@@ -75,7 +75,6 @@ dpgmm = [
 ]
 cuda12 = [
     "jax[cuda12]>=0.4.38",
-    "quadax>=0.2.8",
 ]
 
 [project.urls]
