@@ -15,8 +15,17 @@ Changelog
   __ https://github.com/lpsinger/ligo.skymap/issues/32
   __ https://github.com/nicholasjannsen
 
-- Speed up ``ligo.skymap.moc.bayestar_adaptive_grid`` by rewriting it with
-  Numpy so that it can make use of vectorized sampling functions.
+- Several performance improvements in ``ligo-skymap-from-samples``:
+
+   - Rewrite ``ligo.skymap.moc.bayestar_adaptive_grid`` in Numpy so that it can
+     make use of vectorized sampling functions.
+
+   - When evaluating Numpy vectorized functions using Python multiprocessing,
+     pass the entire chunk to the vector function. See
+     ``ligo.skymap.util.progress_map_vectorized``.
+
+   - Refactor final distance columns computation so that it is executed only
+     once, not twice.
 
 2.4.0 (2025-05-22)
 ==================

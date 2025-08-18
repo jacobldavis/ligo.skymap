@@ -31,7 +31,7 @@ from scipy.stats import gaussian_kde
 
 from . import distance, moc
 from .coordinates import EigenFrame
-from .util import progress_map
+from .util import progress_map, progress_map_vectorized
 
 log = logging.getLogger()
 
@@ -210,9 +210,10 @@ def k_means(pts, k):
         (exclusive) indicating the assignment of each point to a region.
 
     """
-    assert pts.shape[0] > k, "must have more points than means"
+    n = len(pts)
+    assert n > k, "must have more points than means"
 
-    mus = np.random.permutation(pts)[:k, :]
+    mus = pts[np.random.choice(n, k, replace=False)]
     assign = km_assign(mus, pts)
     while True:
         old_assign = assign
@@ -221,9 +222,7 @@ def k_means(pts, k):
         assign = km_assign(mus, pts)
 
         if np.all(assign == old_assign):
-            break
-
-    return mus, assign
+            return mus, assign
 
 
 def _cluster(cls, pts, whitened_pts, trials, i, seed, jobs):
@@ -318,8 +317,11 @@ class ClusteredKDE:
         w = np.asarray([kde.n for kde in self.kdes])
         return w / np.sum(w)
 
-    def _map(self, func, items):
+    def _map(self, func, items, *args, **kwargs):
         return progress_map(func, items, jobs=self.jobs)
+
+    def _map_vectorized(self, func, items, *args, **kwargs):
+        return progress_map_vectorized(func, items, jobs=self.jobs, *args, **kwargs)
 
 
 class SkyKDE(ClusteredKDE):
@@ -420,7 +422,7 @@ class Clustered2DSkyKDE(SkyKDE, metaclass=_Clustered2DSkyKDEMeta):
         return _Clustered2DSkyKDE_factory, factory_args, self.__dict__
 
     def __call__(self, pts):
-        return np.asarray(list(self._map(self.eval_kdes, self.transform(pts))))
+        return self._map_vectorized(self.eval_kdes, self.transform(pts))
 
     def eval_kdes(self, pts):
         base = super().eval_kdes
@@ -457,6 +459,10 @@ class Clustered3DSkyKDE(SkyKDE):
         else:
             return probdensity
 
+    def eval_distances(self, pts):
+        _, *result = self(pts, distances=True)
+        return result
+
     def posterior_spherical(self, pts):
         """Evaluate the posterior probability density in spherical polar
         coordinates, as a function of (ra, dec, distance).
@@ -473,7 +479,7 @@ class Clustered3DSkyKDE(SkyKDE):
         theta, phi = hp.pix2ang(nside, ipix, nest=True)
         p = np.column_stack((phi, 0.5 * np.pi - theta))
         log.info("evaluating distance layers ...")
-        _, m["DISTMU"], m["DISTSIGMA"], m["DISTNORM"] = self(p, distances=True)
+        m["DISTMU"], m["DISTSIGMA"], m["DISTNORM"] = self.eval_distances(p)
         return m
 
 
@@ -490,13 +496,12 @@ class Clustered2Plus1DSkyKDE(Clustered3DSkyKDE):
             )
         super().__init__(pts, max_k=max_k, trials=trials, assign=assign, jobs=jobs)
 
-    def __call__(self, pts, distances=False):
-        probdensity = self.twod(pts)
-        if distances:
-            _, distmu, distsigma, distnorm = super().__call__(pts, distances=True)
-            return probdensity, distmu, distsigma, distnorm
-        else:
-            return probdensity
+    def __call__(self, pts):
+        return self.twod(pts)
+
+    def eval_distances(self, pts):
+        _, *result = super().__call__(pts, distances=True)
+        return result
 
     def posterior_spherical(self, pts):
         """Evaluate the posterior probability density in spherical polar
