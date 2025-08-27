@@ -18,7 +18,7 @@
 import jax.numpy as jnp
 from jax import jit, lax, vmap
 from jax.scipy.special import i0e
-from quadax import quadgk  # type: ignore
+from quadax import quadgk
 
 from ligo.skymap.jaxcore.cosmology import (
     dVC_dVL_data,
