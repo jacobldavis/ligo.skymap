@@ -176,6 +176,7 @@ def main(args=None):
                     enable_snr_series=opts.enable_snr_series,
                     f_high_truncate=opts.f_high_truncate,
                     rescale_loglikelihood=opts.rescale_loglikelihood,
+                    enable_jax=opts.enable_jax,
                 )
                 if not opts.enable_multiresolution:
                     sky_map = rasterize(sky_map)
