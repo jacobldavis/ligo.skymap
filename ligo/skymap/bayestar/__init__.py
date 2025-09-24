@@ -536,15 +536,11 @@ def localize(
         structured["DISTMEAN"] = skymap[:, 2]
         structured["DISTSTD"] = skymap[:, 3]
         skymap = structured
-
-        # Create the table
         skymap = Table(skymap, copy=False)
         skymap.meta["log_bci"] = log_bci
         skymap.meta["log_bsn"] = log_bsn
     else:
         skymap, log_bci, log_bsn = core.toa_phoa_snr(*args)
-
-        # Create the table
         skymap = Table(skymap, copy=False)
         skymap.meta["log_bci"] = log_bci
         skymap.meta["log_bsn"] = log_bsn
