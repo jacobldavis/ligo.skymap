@@ -69,9 +69,6 @@ def test_localize_1_detector(mock_event):
     assert rasterized
 
 
-multiprocessing.set_start_method("fork", force=True)
-
-
 def run_interruptible(event, started, cancelled):
     started.set()
     try:
