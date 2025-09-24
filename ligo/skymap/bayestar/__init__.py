@@ -539,7 +539,6 @@ def localize(
 
         # Create the table
         skymap = Table(skymap, copy=False)
-
         skymap.meta["log_bci"] = log_bci
         skymap.meta["log_bsn"] = log_bsn
     else:
@@ -547,7 +546,6 @@ def localize(
 
         # Create the table
         skymap = Table(skymap, copy=False)
-
         skymap.meta["log_bci"] = log_bci
         skymap.meta["log_bsn"] = log_bsn
 
