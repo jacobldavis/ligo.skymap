@@ -43,7 +43,6 @@ from ..core import log_posterior_toa_phoa_snr as _log_posterior_toa_phoa_snr
 from ..io.events.base import Event
 from ..io.fits import metadata_for_version_module
 from ..io.hdf5 import write_samples
-from ..jaxcore.local import _MAX_NIFOS, _MAX_NSAMPLES, bsm_jax
 from ..kde import Clustered2Plus1DSkyKDE
 from ..util.numpy import require_contiguous_aligned
 from ..util.stopwatch import Stopwatch
@@ -482,6 +481,9 @@ def localize(
             chain_dump=chain_dump,
         )
     elif enable_jax:
+        # Import JAX localize
+        from ..jaxcore.local import _MAX_NIFOS, _MAX_NSAMPLES, bsm_jax
+
         # Add padding to use the compiled function
         nifos = len(toas)
         nsamples = snrs.shape[1]
@@ -529,15 +531,10 @@ def localize(
             ("DISTSTD", "f8"),
         ]
         structured = np.zeros(len(skymap), dtype=dtype)
-
-        uniq = skymap[:, 0].astype(np.int64)
-        probdensity = skymap[:, 1]
-        distmean = skymap[:, 2]
-        diststd = skymap[:, 3]
-        structured["UNIQ"] = uniq
-        structured["PROBDENSITY"] = probdensity
-        structured["DISTMEAN"] = distmean
-        structured["DISTSTD"] = diststd
+        structured["UNIQ"] = skymap[:, 0].astype(np.int64)
+        structured["PROBDENSITY"] = skymap[:, 1]
+        structured["DISTMEAN"] = skymap[:, 2]
+        structured["DISTSTD"] = skymap[:, 3]
         skymap = structured
 
         # Create the table
