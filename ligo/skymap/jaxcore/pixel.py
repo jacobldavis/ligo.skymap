@@ -412,32 +412,6 @@ def compute_accum(iint, accum):
 
 
 @jit
-def safe_eval(
-    integrator_tuple,
-    integrator_b,
-    itwopsi,
-    iu,
-    isample,
-    u_points_weights,
-    p,
-    b,
-    log_p,
-    log_b,
-):
-    val = u_points_weights[iu][1] + log_radial_integrator.integrator_eval(
-        integrator_tuple[0],
-        integrator_tuple[1],
-        integrator_tuple[2],
-        integrator_b,
-        p[itwopsi][iu],
-        b[itwopsi][iu][isample],
-        log_p[itwopsi][iu],
-        log_b[itwopsi][iu][isample],
-    )
-    return jnp.where(jnp.isfinite(val), val, u_points_weights[iu][1])
-
-
-@jit
 def bsm_pixel_prob_jax(
     integrators,
     uniq,
@@ -460,8 +434,6 @@ def bsm_pixel_prob_jax(
     ----------
     integrators : list
         Tupled radial integrators (region functions and limits).
-    flag : int
-        Controls where results are stored (see below).
     uniq : int
         Uniq id of the pixel in the array.
     px : array_like
@@ -517,24 +489,25 @@ def bsm_pixel_prob_jax(
     )(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = vmap(
-        lambda itwopsi: vmap(
-            lambda iu: vmap(
-                lambda isample: safe_eval(
-                    integrators[0][0],
-                    integrators[1][0],
-                    itwopsi,
-                    iu,
-                    isample,
-                    u_points_weights,
-                    p,
-                    b,
-                    log_p,
-                    log_b,
-                )
-            )(jnp.arange(snrs.shape[1]))
-        )(jnp.arange(nu))
-    )(jnp.arange(ntwopsi))
+    itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
+        jnp.arange(ntwopsi), jnp.arange(nu), jnp.arange(snrs.shape[1]), indexing="ij"
+    )
+    itwopsi_flat = itwopsi_grid.ravel()
+    iu_flat = iu_grid.ravel()
+    isample_flat = isample_grid.ravel()
+
+    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+        integrators[0][0][0],
+        integrators[0][0][1],
+        integrators[0][0][2],
+        integrators[1][0],
+        p[itwopsi_flat, iu_flat],
+        b[itwopsi_flat, iu_flat, isample_flat],
+        log_p[itwopsi_flat, iu_flat],
+        log_b[itwopsi_flat, iu_flat, isample_flat],
+    )
+    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
+    accum0 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
     accum = jnp.array([accum0])
 
     # Return updated pixel row
@@ -564,8 +537,6 @@ def bsm_pixel_dist_jax(
     ----------
     integrators : list
         Tupled radial integrators (region functions and limits).
-    flag : int
-        Controls where results are stored (see below).
     uniq : int
         Uniq id of the pixel in the array.
     px : array_like
@@ -621,42 +592,38 @@ def bsm_pixel_dist_jax(
     )(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum1 = vmap(
-        lambda itwopsi: vmap(
-            lambda iu: vmap(
-                lambda isample: safe_eval(
-                    integrators[0][1],
-                    integrators[1][1],
-                    itwopsi,
-                    iu,
-                    isample,
-                    u_points_weights,
-                    p,
-                    b,
-                    log_p,
-                    log_b,
-                )
-            )(jnp.arange(snrs.shape[1]))
-        )(jnp.arange(nu))
-    )(jnp.arange(ntwopsi))
-    accum2 = vmap(
-        lambda itwopsi: vmap(
-            lambda iu: vmap(
-                lambda isample: safe_eval(
-                    integrators[0][2],
-                    integrators[1][2],
-                    itwopsi,
-                    iu,
-                    isample,
-                    u_points_weights,
-                    p,
-                    b,
-                    log_p,
-                    log_b,
-                )
-            )(jnp.arange(snrs.shape[1]))
-        )(jnp.arange(nu))
-    )(jnp.arange(ntwopsi))
+    itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
+        jnp.arange(ntwopsi), jnp.arange(nu), jnp.arange(snrs.shape[1]), indexing="ij"
+    )
+    itwopsi_flat = itwopsi_grid.ravel()
+    iu_flat = iu_grid.ravel()
+    isample_flat = isample_grid.ravel()
+
+    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+        integrators[0][1][0],
+        integrators[0][1][1],
+        integrators[0][1][2],
+        integrators[1][1],
+        p[itwopsi_flat, iu_flat],
+        b[itwopsi_flat, iu_flat, isample_flat],
+        log_p[itwopsi_flat, iu_flat],
+        log_b[itwopsi_flat, iu_flat, isample_flat],
+    )
+    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
+    accum1 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
+
+    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+        integrators[0][2][0],
+        integrators[0][2][1],
+        integrators[0][2][2],
+        integrators[1][2],
+        p[itwopsi_flat, iu_flat],
+        b[itwopsi_flat, iu_flat, isample_flat],
+        log_p[itwopsi_flat, iu_flat],
+        log_b[itwopsi_flat, iu_flat, isample_flat],
+    )
+    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
+    accum2 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
     accum = jnp.array([accum1, accum2])
 
     # Return updated pixel row
@@ -687,14 +654,8 @@ def bsm_pixel_accum_jax(
     ----------
     integrators : list
         Tupled radial integrators (region functions and limits).
-    flag : int
-        Controls where results are stored (see below).
     uniq : int
         Uniq id of the pixel in the array.
-    iifo : int
-        Detector index.
-    px : array_like
-        Pixel row to modify.
     gmst : float
         Greenwich Mean Sidereal Time.
     nifos : int
@@ -745,24 +706,25 @@ def bsm_pixel_accum_jax(
     )(jnp.arange(ntwopsi))
 
     # Initialize accum with the integrator evaluation
-    accum0 = vmap(
-        lambda itwopsi: vmap(
-            lambda iu: vmap(
-                lambda isample: safe_eval(
-                    integrators[0][0],
-                    integrators[1][0],
-                    itwopsi,
-                    iu,
-                    isample,
-                    u_points_weights,
-                    p,
-                    b,
-                    log_p,
-                    log_b,
-                )
-            )(jnp.arange(snrs.shape[1]))
-        )(jnp.arange(nu))
-    )(jnp.arange(ntwopsi))
+    itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
+        jnp.arange(ntwopsi), jnp.arange(nu), jnp.arange(snrs.shape[1]), indexing="ij"
+    )
+    itwopsi_flat = itwopsi_grid.ravel()
+    iu_flat = iu_grid.ravel()
+    isample_flat = isample_grid.ravel()
+
+    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+        integrators[0][0][0],
+        integrators[0][0][1],
+        integrators[0][0][2],
+        integrators[1][0],
+        p[itwopsi_flat, iu_flat],
+        b[itwopsi_flat, iu_flat, isample_flat],
+        log_p[itwopsi_flat, iu_flat],
+        log_b[itwopsi_flat, iu_flat, isample_flat],
+    )
+    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
+    accum0 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
     accum = jnp.array([accum0])
 
     # Return updated accum value
