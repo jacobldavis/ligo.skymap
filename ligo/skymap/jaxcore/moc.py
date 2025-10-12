@@ -19,11 +19,8 @@ import jax.numpy as jnp
 from jax import jit
 
 default_log_radial_integrator_size = 400
-M_PI_2 = jnp.pi / 2
-M_LN2 = jnp.log(2)
 ntwopsi = 10
 nu = 10
-# --- MOC AND HEALPIX FUNCTIONS ---
 
 
 def ang2vec(theta, phi):

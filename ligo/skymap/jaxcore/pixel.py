@@ -22,7 +22,7 @@ import numpy as np
 from jax import jit, vmap
 
 from ligo.skymap.jaxcore.integrate import log_radial_integrator
-from ligo.skymap.jaxcore.moc import M_PI_2, ang2vec, ntwopsi, nu, uniq2ang64
+from ligo.skymap.jaxcore.moc import ang2vec, ntwopsi, nu, uniq2ang64
 
 
 def extract_integrator_regions(integrators):
@@ -174,7 +174,7 @@ def compute_F(responses, horizons, phi, theta, gmst, nifos):
     """
 
     def body(i):
-        val = antenna_factor(responses[i], phi, M_PI_2 - theta, gmst)
+        val = antenna_factor(responses[i], phi, jnp.pi / 2 - theta, gmst)
         val *= horizons[i]
         return jnp.where(i < nifos, val, 0)
 

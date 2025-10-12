@@ -28,7 +28,7 @@ from ligo.skymap.jaxcore.cosmology import (
     dVC_dVL_tmax,
     dVC_dVL_tmin,
 )
-from ligo.skymap.jaxcore.interp import SQRT_2, bicubic_interp, cubic_interp
+from ligo.skymap.jaxcore.interp import bicubic_interp, cubic_interp
 
 # --- COSMOLOGY ---
 
@@ -348,12 +348,12 @@ class log_radial_integrator:
         p0 = jnp.where(k >= 0, 0.5 * r2, 0.5 * r1)
         xmax = jnp.log(pmax)
         x0 = jnp.where(jnp.log(p0) > xmax, jnp.log(p0), xmax)
-        xmin = x0 - (1 + SQRT_2) * alpha
+        xmin = x0 - (1 + jnp.sqrt(2)) * alpha
         self.ymax = x0 + alpha
-        ymin = 2 * x0 - SQRT_2 * alpha - xmax
+        ymin = 2 * x0 - jnp.sqrt(2) * alpha - xmax
         d = (xmax - xmin) / (size - 1)
-        umin = -(1 + 1 / SQRT_2) * alpha
-        self.vmax = x0 - (1 / SQRT_2) * alpha
+        umin = -(1 + 1 / jnp.sqrt(2)) * alpha
+        self.vmax = x0 - (1 / jnp.sqrt(2)) * alpha
         k1 = k + 1
         r2 = jnp.where(1e-12 > r2, 1e-12, r2)
         r1 = jnp.where(1e-12 > r1, 1e-12, r1)

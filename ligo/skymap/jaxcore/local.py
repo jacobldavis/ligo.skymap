@@ -22,7 +22,6 @@ import numpy as np
 from jax import jit, lax, vmap
 
 from ligo.skymap.jaxcore.moc import (
-    M_LN2,
     default_log_radial_integrator_size,
     nest2uniq64,
     ntwopsi,
@@ -148,7 +147,7 @@ def bayestar_pixels_sort_prob(pixels):
         uniq = pixel[0]
         logp = pixel[1]
         order = uniq2order64(uniq)
-        return logp - 2 * M_LN2 * order
+        return logp - 2 * jnp.log(2) * order
 
     scores = vmap(compute_score)(pixels)
     sorted_indices = jnp.argsort(scores)

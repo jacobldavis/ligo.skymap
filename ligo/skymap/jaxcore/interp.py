@@ -19,8 +19,6 @@ from functools import partial
 import jax.numpy as jnp
 from jax import jit, vmap
 
-ARANGE4 = jnp.arange(4)
-SQRT_2 = jnp.sqrt(2)
 ETA = 0.01
 
 # --- CUBIC INTERP ---
@@ -217,10 +215,10 @@ def compute_coeffs(data, ns, nt):
             kt = jnp.clip(itt + jt - 4, 0, nt - 1)
             return data[ks * nt + kt]
 
-        return vmap(get_zt)(ARANGE4)
+        return vmap(get_zt)(jnp.arange(4))
 
     def compute_block(iss, itt):
-        a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(ARANGE4)
+        a_rows = vmap(lambda js: interpolate_1d(get_z(js, iss, itt)))(jnp.arange(4))
         return vmap(interpolate_1d)(a_rows.T)
 
     blocks = vmap(
