@@ -16,7 +16,7 @@
 #
 
 import jax.numpy as jnp
-import pytest  # type: ignore
+import pytest
 from jax import vmap
 
 from ligo.skymap.jaxcore.interp import bicubic_interp, cubic_interp
