@@ -17,7 +17,6 @@
 
 import jax.numpy as jnp
 import pytest
-from jax import vmap
 
 from ligo.skymap.jaxcore.interp import bicubic_interp, cubic_interp
 
@@ -54,11 +53,7 @@ def test_bicubic_interp_flat_plane():
         1,
     )
 
-    result = vmap(
-        lambda ss, tt: test.bicubic_interp_eval_jax(
-            ss, tt, test.fx, test.x0, test.xlength, test.a
-        )
-    )(s, t)
+    result = test.bicubic_interp_eval_jax(s, t, test.fx, test.x0, test.xlength, test.a)
     assert jnp.isfinite(result).all()
     assert result[0] == pytest.approx(0, abs=1e-2)
     assert result[-1] == pytest.approx(2, abs=1e-2)
@@ -77,11 +72,7 @@ def test_bicubic_interp_ramp():
         1,
     )
 
-    result = vmap(
-        lambda ss, tt: test.bicubic_interp_eval_jax(
-            ss, tt, test.fx, test.x0, test.xlength, test.a
-        )
-    )(s, t)
+    result = test.bicubic_interp_eval_jax(s, t, test.fx, test.x0, test.xlength, test.a)
     assert jnp.isfinite(result).all()
     assert result[0] == pytest.approx(0, abs=1e-2)
     assert result[-1] == pytest.approx(8, abs=1e-1)

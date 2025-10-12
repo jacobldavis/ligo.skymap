@@ -282,12 +282,12 @@ class bicubic_interp:
         result : float
             Interpolated value at the given point(s).
         """
-        s = jnp.asarray(s)
-        t = jnp.asarray(t)
+        s = jnp.atleast_1d(jnp.asarray(s))
+        t = jnp.atleast_1d(jnp.asarray(t))
+
         x = jnp.stack([s, t], axis=-1)
 
         def eval_point(x):
-            x = jnp.atleast_1d(x)
             is_nan = jnp.isnan(x[0]) | jnp.isnan(x[1])
 
             x_scaled = x * fx + x0
@@ -304,4 +304,5 @@ class bicubic_interp:
 
             return jnp.where(is_nan, x[0] + x[1], result)
 
-        return eval_point(x)
+        result = vmap(eval_point)(x)
+        return jnp.squeeze(result)
