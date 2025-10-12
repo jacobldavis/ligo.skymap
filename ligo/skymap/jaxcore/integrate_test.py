@@ -16,7 +16,7 @@
 #
 
 import jax.numpy as jnp
-import pytest  # type: ignore
+import pytest
 
 from ligo.skymap.jaxcore.integrate import log_radial_integrator
 
@@ -73,3 +73,93 @@ def test_log_radial_integral(expected, tol, r1, r2, p2, b, k):
     )
 
     assert result_jax == pytest.approx(expected, abs=tol)
+
+
+def test_log_radial_integral_vectorized():
+    # Test data as arrays
+    expected = jnp.array(
+        [
+            0,
+            0,
+            jnp.log(63),
+            -0.480238,
+            0.432919,
+            -2.76076,
+            61.07118,
+            -jnp.inf,
+            -jnp.inf,
+            2.94548,
+            2.94545,
+            2.94085,
+            -2.43264,
+            -2.43808,
+            -0.707038,
+        ]
+    )
+    tol = jnp.array(
+        [
+            0,
+            0,
+            0,
+            1e-3,
+            1e-3,
+            1e-3,
+            1e-3,
+            5e-2,
+            1e-3,
+            1e-4,
+            1e-4,
+            1e-4,
+            1e-5,
+            1e-5,
+            1e-5,
+        ]
+    )
+    r1 = jnp.array([0, jnp.exp(1), 3, 1, 1, 0, 0, 0, 0, 0, 0.5, 1, 0, 0.5, 1])
+    r2 = jnp.array([1, jnp.exp(2), 6, 2, 2, 1, 1e9, 0.1, 1e-3, 4, 4, 4, 1, 1, 1.5])
+    p2 = jnp.array([0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    b = jnp.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1])
+    k = jnp.array([0, -1, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2])
+
+    p = jnp.sqrt(p2)
+
+    # Create integrators for each test case
+    integrators = [
+        log_radial_integrator(r1[i], r2[i], k[i], 0, p[i] + 0.5, 400)
+        for i in range(len(expected))
+    ]
+
+    # Extract regions and limits
+    region0_list = [
+        (integ.region0.fx, integ.region0.x0, integ.region0.xlength, integ.region0.a)
+        for integ in integrators
+    ]
+    region1_list = [
+        (integ.region1.f, integ.region1.t0, integ.region1.length, integ.region1.a)
+        for integ in integrators
+    ]
+    region2_list = [
+        (integ.region2.f, integ.region2.t0, integ.region2.length, integ.region2.a)
+        for integ in integrators
+    ]
+    limits_list = [(integ.p0_limit, integ.vmax, integ.ymax) for integ in integrators]
+
+    result_jax = jnp.array(
+        [
+            integrators[i].integrator_eval(
+                region0_list[i],
+                region1_list[i],
+                region2_list[i],
+                limits_list[i],
+                p[i],
+                b[i],
+                jnp.log(p[i]),
+                jnp.log(b[i]),
+            )
+            for i in range(len(expected))
+        ]
+    )
+
+    # Check each result against expected with its tolerance
+    for i in range(len(expected)):
+        assert result_jax[i] == pytest.approx(expected[i], abs=tol[i])
