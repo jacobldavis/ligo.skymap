@@ -21,15 +21,15 @@ from jax import jit, vmap
 
 ETA = 0.01
 
-# --- CUBIC INTERP ---
-
-
 @jit
 def nan_or_inf(x):
     return jnp.isnan(x) | jnp.isinf(x)
 
 
-class cubic_interp:
+# --- CUBIC INTERP ---
+
+
+def cubic_interp_init(data, n, tmin, dt):
     """1D cubic interpolation using precomputed coefficients.
 
     Parameters
@@ -54,100 +54,99 @@ class cubic_interp:
     a : jax.numpy.ndarray
         Array of shape (n+6, 4) containing cubic coefficients.
     """
+    f = 1 / dt
+    t0 = 3 - f * tmin
+    length = n + 6
+    a = vmap(lambda idx: compute_cubic_coeffs(idx, data, n))(jnp.arange(n + 6))
+    return f, t0, length, a
 
-    def __init__(self, data, n, tmin, dt):
-        self.f = 1 / dt
-        self.t0 = 3 - self.f * tmin
-        self.length = n + 6
-        self.a = vmap(lambda idx: self.compute_coeffs(idx, data, n))(jnp.arange(n + 6))
+@staticmethod
+@jit
+def compute_cubic_coeffs(idx, data, n):
+    """Compute cubic interpolation coefficients.
 
-    @staticmethod
-    @jit
-    def compute_coeffs(idx, data, n):
-        """Compute cubic interpolation coefficients.
+    Parameters
+    ----------
+    data : array_like
+        Input data.
+    n : int
+        Number of samples in data.
+    idx : array_like
+        Index array for interpolation positions.
 
-        Parameters
-        ----------
-        data : array_like
-            Input data.
-        n : int
-            Number of samples in data.
-        idx : array_like
-            Index array for interpolation positions.
+    Returns
+    -------
+    coeffs : jax.numpy.ndarray
+        Array of cubic coefficients, shape (4).
+    """
+    # Clip indices and build z
+    z = jnp.array(
+        [
+            data[jnp.clip(idx - 4, 0, n - 1)],
+            data[jnp.clip(idx - 3, 0, n - 1)],
+            data[jnp.clip(idx - 2, 0, n - 1)],
+            data[jnp.clip(idx - 1, 0, n - 1)],
+        ]
+    )
+    bad12 = nan_or_inf(z[1] + z[2])
+    bad03 = nan_or_inf(z[0] + z[3])
 
-        Returns
-        -------
-        coeffs : jax.numpy.ndarray
-            Array of cubic coefficients, shape (4).
-        """
-        # Clip indices and build z
-        z = jnp.array(
-            [
-                data[jnp.clip(idx - 4, 0, n - 1)],
-                data[jnp.clip(idx - 3, 0, n - 1)],
-                data[jnp.clip(idx - 2, 0, n - 1)],
-                data[jnp.clip(idx - 1, 0, n - 1)],
-            ]
-        )
-        bad12 = nan_or_inf(z[1] + z[2])
-        bad03 = nan_or_inf(z[0] + z[3])
+    # Compute coefficients
+    a0 = 1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0])
+    a1 = z[0] - 2.5 * z[1] + 2 * z[2] - 0.5 * z[3]
+    a2 = 0.5 * (z[2] - z[0])
+    a3 = z[1]
 
-        # Compute coefficients
-        a0 = 1.5 * (z[1] - z[2]) + 0.5 * (z[3] - z[0])
-        a1 = z[0] - 2.5 * z[1] + 2 * z[2] - 0.5 * z[3]
-        a2 = 0.5 * (z[2] - z[0])
-        a3 = z[1]
+    # Initialize coefficients
+    return jnp.array(
+        [
+            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
+            jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
+            jnp.where(bad12, 0.0, jnp.where(bad03, z[2] - z[1], a2)),
+            jnp.where(bad12, z[1], jnp.where(bad03, z[1], a3)),
+        ]
+    )
 
-        # Initialize coefficients
-        return jnp.array(
-            [
-                jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a0)),
-                jnp.where(bad12, 0.0, jnp.where(bad03, 0.0, a1)),
-                jnp.where(bad12, 0.0, jnp.where(bad03, z[2] - z[1], a2)),
-                jnp.where(bad12, z[1], jnp.where(bad03, z[1], a3)),
-            ]
-        )
+@staticmethod
+@jit
+def cubic_interp_eval(data, f, t0, length, a):
+    """Evaluate interpolated values for input points using coefficients.
 
-    @staticmethod
-    @jit
-    def cubic_interp_eval_jax(data, f, t0, length, a):
-        """Evaluate interpolated values for input points using coefficients.
+    Parameters
+    ----------
+    data : array_like
+        Input t-values to evaluate.
+    f : float
+        Scaling factor (1/dt).
+    t0 : float
+        Offset for scaling.
+    length : int
+        Length of coefficient array.
+    a : array_like
+        Coefficient array.
 
-        Parameters
-        ----------
-        data : array_like
-            Input t-values to evaluate.
-        f : float
-            Scaling factor (1/dt).
-        t0 : float
-            Offset for scaling.
-        length : int
-            Length of coefficient array.
-        a : array_like
-            Coefficient array.
+    Returns
+    -------
+    result : jax.numpy.ndarray
+        Interpolated values.
+    """
+    x = jnp.clip(data * f + t0, 0.0, length - 1.0)
+    ix = x.astype(int)
+    x -= ix
 
-        Returns
-        -------
-        result : jax.numpy.ndarray
-            Interpolated values.
-        """
-        x = jnp.clip(data * f + t0, 0.0, length - 1.0)
-        ix = x.astype(int)
-        x -= ix
+    a0 = a[ix, 0]
+    a1 = a[ix, 1]
+    a2 = a[ix, 2]
+    a3 = a[ix, 3]
 
-        a0 = a[ix, 0]
-        a1 = a[ix, 1]
-        a2 = a[ix, 2]
-        a3 = a[ix, 3]
-
-        return x * (x * (x * a0 + a1) + a2) + a3
+    return x * (x * (x * a0 + a1) + a2) + a3
 
 
 # --- BICUBIC INTERP ---
 
 
 @jit
-def cubic_eval(coeffs, x):
+def cubic_eval_helper(coeffs, x):
     return ((coeffs[..., 0] * x + coeffs[..., 1]) * x + coeffs[..., 2]) * x + coeffs[
         ..., 3
     ]
@@ -188,7 +187,7 @@ def interpolate_1d(z):
 
 
 @partial(jit, static_argnames=["ns", "nt"])
-def compute_coeffs(data, ns, nt):
+def compute_bicubic_coeffs(data, ns, nt):
     """Compute bicubic interpolation coefficients from 2D gridded data.
 
     Parameters
@@ -227,7 +226,7 @@ def compute_coeffs(data, ns, nt):
     return blocks.reshape(length_s * length_t, 4, 4)
 
 
-class bicubic_interp:
+def bicubic_interp_init(data, ns, nt, smin, tmin, ds, dt):
     """2D bicubic interpolation using precomputed coefficients.
 
     Parameters
@@ -252,57 +251,56 @@ class bicubic_interp:
     a : jax.numpy.ndarray
         Precomputed bicubic coefficient tensor.
     """
+    fx = jnp.array([1 / ds, 1 / dt])
+    x0 = jnp.array([3 - fx[0] * smin, 3 - fx[1] * tmin])
+    xlength = jnp.array([ns + 6, nt + 6])
+    a = compute_bicubic_coeffs(data, ns, nt)
+    return fx, x0, xlength, a
 
-    def __init__(self, data, ns, nt, smin, tmin, ds, dt):
-        self.fx = jnp.array([1 / ds, 1 / dt])
-        self.x0 = jnp.array([3 - self.fx[0] * smin, 3 - self.fx[1] * tmin])
-        self.xlength = jnp.array([ns + 6, nt + 6])
-        self.a = compute_coeffs(data, ns, nt)
+@staticmethod
+@jit
+def bicubic_interp_eval(s, t, fx, x0, xlength, a):
+    """Evaluate bicubic interpolation at point(s) (s, t).
 
-    @staticmethod
-    @jit
-    def bicubic_interp_eval_jax(s, t, fx, x0, xlength, a):
-        """Evaluate bicubic interpolation at point(s) (s, t).
+    Parameters
+    ----------
+    s, t : float or array_like
+        Evaluation coordinates.
+    fx : array_like
+        Inverse step sizes in each dimension.
+    x0 : array_like
+        Offset constants.
+    xlength : array_like
+        Sizes of each dimension.
+    a : array_like
+        Flattened coefficients of shape (ns*nt, 4, 4).
 
-        Parameters
-        ----------
-        s, t : float or array_like
-            Evaluation coordinates.
-        fx : array_like
-            Inverse step sizes in each dimension.
-        x0 : array_like
-            Offset constants.
-        xlength : array_like
-            Sizes of each dimension.
-        a : array_like
-            Flattened coefficients of shape (ns*nt, 4, 4).
+    Returns
+    -------
+    result : float
+        Interpolated value at the given point(s).
+    """
+    s = jnp.atleast_1d(jnp.asarray(s))
+    t = jnp.atleast_1d(jnp.asarray(t))
 
-        Returns
-        -------
-        result : float
-            Interpolated value at the given point(s).
-        """
-        s = jnp.atleast_1d(jnp.asarray(s))
-        t = jnp.atleast_1d(jnp.asarray(t))
+    x = jnp.stack([s, t], axis=-1)
 
-        x = jnp.stack([s, t], axis=-1)
+    def eval_point(x):
+        is_nan = jnp.isnan(x[0]) | jnp.isnan(x[1])
 
-        def eval_point(x):
-            is_nan = jnp.isnan(x[0]) | jnp.isnan(x[1])
+        x_scaled = x * fx + x0
+        x_clipped = jnp.clip(x_scaled, 0.0, xlength - 1.0)
 
-            x_scaled = x * fx + x0
-            x_clipped = jnp.clip(x_scaled, 0.0, xlength - 1.0)
+        ix = jnp.floor(x_clipped).astype(jnp.int32)
+        x_frac = x_clipped - ix
 
-            ix = jnp.floor(x_clipped).astype(jnp.int32)
-            x_frac = x_clipped - ix
+        flat_idx = ix[0] * xlength[1] + ix[1]
+        coeff = a[flat_idx]
 
-            flat_idx = ix[0] * xlength[1] + ix[1]
-            coeff = a[flat_idx]
+        b = cubic_eval_helper(coeff.T, x_frac[1])
+        result = cubic_eval_helper(b, x_frac[0])
 
-            b = cubic_eval(coeff.T, x_frac[1])
-            result = cubic_eval(b, x_frac[0])
+        return jnp.where(is_nan, x[0] + x[1], result)
 
-            return jnp.where(is_nan, x[0] + x[1], result)
-
-        result = vmap(eval_point)(x)
-        return jnp.squeeze(result)
+    result = vmap(eval_point)(x)
+    return jnp.squeeze(result)
