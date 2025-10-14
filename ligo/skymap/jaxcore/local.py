@@ -39,67 +39,6 @@ _MAX_NIFOS = 5
 _MAX_NSAMPLES = 1000
 
 
-def extract_integrator_regions(integrators):
-    """
-    Extract region parameters from each log_radial_integrator.
-
-    Parameters
-    ----------
-    integrators : list
-        List of log_radial_integrator objects.
-
-    Returns
-    -------
-    list of tuples
-        Each tuple contains region0, region1, and region2 parameters.
-    """
-    result = []
-    for integrator in integrators:
-        result.append(
-            (
-                (
-                    integrator.region0.fx,
-                    integrator.region0.x0,
-                    integrator.region0.xlength,
-                    integrator.region0.a,
-                ),
-                (
-                    integrator.region1.f,
-                    integrator.region1.t0,
-                    integrator.region1.length,
-                    integrator.region1.a,
-                ),
-                (
-                    integrator.region2.f,
-                    integrator.region2.t0,
-                    integrator.region2.length,
-                    integrator.region2.a,
-                ),
-            )
-        )
-    return result
-
-
-def extract_integrator_limits(integrators):
-    """
-    Extract the p0_limit, vmax, and ymax constants for each integrator.
-
-    Parameters
-    ----------
-    integrators : list
-        List of log_radial_integrator objects.
-
-    Returns
-    -------
-    list of tuples
-        Each tuple contains (p0_limit, vmax, ymax).
-    """
-    result = []
-    for integrator in integrators:
-        result.append((integrator.p0_limit, integrator.vmax, integrator.ymax))
-    return result
-
-
 @jit
 def logsumexp(accum, log_weight):
     """

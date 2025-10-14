@@ -19,7 +19,7 @@ from functools import partial
 
 import jax.numpy as jnp
 import numpy as np
-from jax import jit, vmap
+from jax import jit
 
 from ligo.skymap.jaxcore.integrate import integrator_eval
 from ligo.skymap.jaxcore.moc import ang2vec, ntwopsi, nu, uniq2ang64
@@ -65,6 +65,8 @@ def compute_F(responses, horizons, phi, theta, gmst, nifos):
         Source polar angle.
     gmst : float
         Greenwich mean sidereal time.
+    nifos : int
+        Number of detectors.
     Returns
     -------
     array
@@ -146,125 +148,49 @@ def exp_i(phi):
 
 
 @jit
-def eval_snr(x, nsamples, t):
+def compute_snrs_interp(snrs, dt, sample_rate, nsamples):
     """
-    Evaluate interpolated complex SNR at fractional sample index.
-
+    Evaluate interpolated complex SNR.
     Parameters
     ----------
-    x : array_like
-        SNR values (magnitude, phase).
+    snrs : array_like
+        Complex-valued SNR time series, shape (nifo, nsamples).
+    dt : array_like
+        Time delays for each detector, shape (nifo,).
+    sample_rate : float
+        Sampling rate in Hz.
     nsamples : int
-        Total number of SNR samples.
-    t : float
-        Time index to interpolate at.
-
+        Number of samples in the SNR time series.
     Returns
     -------
     complex
         Interpolated SNR value, or 0 outside valid range.
     """
-    i = jnp.floor(t).astype(jnp.int32)
-    f = jnp.float32(t - jnp.floor(t))
+    isamples = jnp.arange(snrs.shape[1])
+
+    tt = isamples[None, :] - dt[:, None] * sample_rate - 0.5 * (nsamples - 1)
+
+    i = jnp.floor(tt).astype(jnp.int32)
+    f = jnp.float32(tt - jnp.floor(tt))
     cond = jnp.logical_and(i >= 1, i < nsamples - 2)
 
-    mag = catrom(x[i - 1][0], x[i][0], x[i + 1][0], x[i + 2][0], f)
-    phase = catrom(x[i - 1][1], x[i][1], x[i + 1][1], x[i + 2][1], f)
+    n_detectors = snrs.shape[0]
+    detector_indices = jnp.arange(n_detectors)[:, None]
+    x_im1 = snrs[detector_indices, i - 1]
+    x_i = snrs[detector_indices, i]
+    x_ip1 = snrs[detector_indices, i + 1]
+    x_ip2 = snrs[detector_indices, i + 2]
 
+    mag = catrom(x_im1[..., 0], x_i[..., 0], x_ip1[..., 0], x_ip2[..., 0], f)
+    phase = catrom(x_im1[..., 1], x_i[..., 1], x_ip1[..., 1], x_ip2[..., 1], f)
     val = mag * exp_i(phase)
-    return jnp.where(cond, val, jnp.complex64(0.0 + 0.0j))
 
-
-@jit
-def bayestar_signal_amplitude_model(F, exp_i_twopsi, u, u2):
-    """
-    Compute the complex-valued signal amplitude model for a given inclination.
-
-    Parameters
-    ----------
-    F : array_like
-        Complex antenna factor.
-    exp_i_twopsi : complex
-        e^(i*2*psi), for polarization angle psi.
-    u : float
-        Cosine of the inclination angle.
-    u2 : float
-        Square of the cosine of inclination.
-
-    Returns
-    -------
-    array_like
-        Complex signal amplitude.
-    """
-    tmp = F * jnp.conj(exp_i_twopsi)
-    return 0.5 * (1 + u2) * jnp.real(tmp) - 1j * u * jnp.imag(tmp)
-
-
-@jit
-def compute_samplewise_b(z_times_r, snrs_interp_sample, rescale_loglikelihood):
-    """
-    Compute the per-sample normalization constant b and its log.
-
-    Parameters
-    ----------
-    z_times_r : array_like
-        Complex signal template.
-    snrs_interp_sample : array_like
-        Interpolated SNR sample.
-    rescale_loglikelihood : float
-        Normalization factor for log-likelihood.
-
-    Returns
-    -------
-    tuple
-        b value and log(b).
-    """
-    I0arg = jnp.sum(jnp.conj(z_times_r) * snrs_interp_sample)
-    b_val = jnp.abs(I0arg) * rescale_loglikelihood**2
-    return b_val, jnp.log(b_val)
-
-
-@jit
-def compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood):
-    """
-    Compute likelihood quantities for a specific inclination cosine u.
-
-    Parameters
-    ----------
-    F : array_like
-        Antenna response.
-    exp_i_twopsi : complex
-        e^(i*2*psi), for polarization angle psi.
-    u : float
-        Cosine of inclination.
-    snrs_interp : array_like
-        Interpolated SNR time series.
-    rescale_loglikelihood : float
-        Likelihood normalization factor.
-
-    Returns
-    -------
-    tuple
-        Marginalized likelihood values.
-    """
-    u2 = u * u
-
-    z_times_r = vmap(
-        lambda Fi: bayestar_signal_amplitude_model(Fi, exp_i_twopsi, u, u2)
-    )(F)
-    p2 = jnp.sum(jnp.real(z_times_r) ** 2 + jnp.imag(z_times_r) ** 2)
-    p2 *= 0.5 * rescale_loglikelihood**2
-    p = jnp.sqrt(p2)
-    logp = jnp.log(p)
-
-    b_vals, log_b_vals = vmap(
-        lambda snr: compute_samplewise_b(z_times_r, snr, rescale_loglikelihood)
-    )(snrs_interp)
-    return p, logp, b_vals, log_b_vals
+    result = jnp.where(cond, val, jnp.complex64(0.0 + 0.0j))
+    return result.T
 
 
 @partial(jit, static_argnames=["ntwopsi"])
-def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood):
+def compute_twopsi_slice(F, snrs_interp, ntwopsi, rescale_loglikelihood):
     """
     Evaluate marginalized likelihood for all inclination angles at a fixed 2ψ.
 
@@ -274,8 +200,6 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
         Antenna response.
     snrs_interp : array_like
         Interpolated SNR values.
-    itwopsi : int
-        Index of current polarization angle.
     ntwopsi : int
         Total number of polarization angles.
     rescale_loglikelihood : float
@@ -286,14 +210,29 @@ def compute_twopsi_slice(F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
     tuple
         Arrays of p, log(p), b values, and log(b) for each u.
     """
-    twopsi = (2 * jnp.pi / ntwopsi) * itwopsi
-    exp_i_twopsi = exp_i(twopsi)
+    twopsi_vals = (2 * jnp.pi / ntwopsi) * jnp.arange(ntwopsi)
+    exp_i_twopsi_vals = jnp.exp(1j * twopsi_vals)
 
-    def process_u(iu):
-        u = u_points_weights[iu, 0]
-        return compute_u_point(F, exp_i_twopsi, u, snrs_interp, rescale_loglikelihood)
+    u_vals = u_points_weights[:, 0]
+    u2_vals = u_vals * u_vals
 
-    return vmap(process_u)(jnp.arange(u_points_weights.shape[0]))
+    tmp = F[None, None, :] * jnp.conj(exp_i_twopsi_vals[:, None, None])
+    z_times_r = 0.5 * (1 + u2_vals[None, :, None]) * jnp.real(tmp) - 1j * u_vals[
+        None, :, None
+    ] * jnp.imag(tmp)
+
+    p2 = jnp.sum(jnp.real(z_times_r) ** 2 + jnp.imag(z_times_r) ** 2, axis=2)
+    p2 *= 0.5 * rescale_loglikelihood**2
+    p = jnp.sqrt(p2)
+    logp = jnp.log(p)
+
+    I0arg = jnp.sum(
+        jnp.conj(z_times_r[:, :, None, :]) * snrs_interp[None, None, :, :], axis=3
+    )
+    b = jnp.abs(I0arg) * rescale_loglikelihood**2
+    logb = jnp.log(b)
+
+    return p, logp, b, logb
 
 
 @jit
@@ -388,18 +327,12 @@ def bsm_pixel_prob_jax(
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(
-        lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(
-            snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)
-        )
-    )(jnp.arange(snrs.shape[1]))
+    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
 
-    # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(
-        lambda itwopsi: compute_twopsi_slice(
-            F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
-        )
-    )(jnp.arange(ntwopsi))
+    # Compute p and b values for all twopsi and u
+    p, log_p, b, log_b = compute_twopsi_slice(
+        F, snrs_interp, ntwopsi, rescale_loglikelihood
+    )
 
     # Initialize accum with the integrator evaluation
     itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
@@ -491,18 +424,12 @@ def bsm_pixel_dist_jax(
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(
-        lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(
-            snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)
-        )
-    )(jnp.arange(snrs.shape[1]))
+    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
 
-    # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(
-        lambda itwopsi: compute_twopsi_slice(
-            F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
-        )
-    )(jnp.arange(ntwopsi))
+    # Compute p and b values for all twopsi and u
+    p, log_p, b, log_b = compute_twopsi_slice(
+        F, snrs_interp, ntwopsi, rescale_loglikelihood
+    )
 
     # Initialize accum with the integrator evaluation
     itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
@@ -605,18 +532,12 @@ def bsm_pixel_accum_jax(
     dt = toa_errors(theta, phi, gmst, locations, epochs)
 
     # Shift SNR time series by the time delay for this sky position
-    snrs_interp = vmap(
-        lambda isample: vmap(lambda x, tt: eval_snr(x, nsamples, tt))(
-            snrs, isample - dt * sample_rate - 0.5 * (nsamples - 1)
-        )
-    )(jnp.arange(snrs.shape[1]))
+    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
 
-    # Perform bayestar_signal_amplitude_model
-    p, log_p, b, log_b = vmap(
-        lambda itwopsi: compute_twopsi_slice(
-            F, snrs_interp, itwopsi, ntwopsi, rescale_loglikelihood
-        )
-    )(jnp.arange(ntwopsi))
+    # Compute p and b values for all twopsi and u
+    p, log_p, b, log_b = compute_twopsi_slice(
+        F, snrs_interp, ntwopsi, rescale_loglikelihood
+    )
 
     # Initialize accum with the integrator evaluation
     itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
