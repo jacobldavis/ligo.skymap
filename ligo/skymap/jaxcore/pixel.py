@@ -111,49 +111,9 @@ u_points_weights = u_points_weights_init(nu)
 
 
 @jit
-def antenna_factor(D, ra, dec, gmst):
-    """
-    Compute antenna factors from the detector response tensor.
-
-    Parameters
-    ----------
-    D : array_like
-        Detector tensor (3,3).
-    ra : float
-        Right ascension.
-    dec : float
-        Declination.
-    gmst : float
-        Greenwich mean sidereal time.
-
-    Returns
-    -------
-    complex
-        Complex-valued antenna factor (F_plus + i F_cross).
-    """
-    gha = gmst - ra
-    cosgha = jnp.cos(gha)
-    singha = jnp.sin(gha)
-    cosdec = jnp.cos(dec)
-    sindec = jnp.sin(dec)
-    X = jnp.array([-singha, -cosgha, 0.0])
-    Y = jnp.array([-cosgha * sindec, singha * sindec, cosdec])
-    F = 0
-
-    def dxdy(i):
-        DX = D[i][0] * X[0] + D[i][1] * X[1] + D[i][2] * X[2]
-        DY = D[i][0] * Y[0] + D[i][1] * Y[1] + D[i][2] * Y[2]
-        return (X[i] * DX - Y[i] * DY) + (X[i] * DY + Y[i] * DX) * 1j
-
-    F = jnp.sum(vmap(dxdy)(jnp.arange(3)))
-    return F
-
-
-@jit
 def compute_F(responses, horizons, phi, theta, gmst, nifos):
     """
     Compute the complex antenna response F for each interferometer.
-
     Parameters
     ----------
     responses : array_like
@@ -166,19 +126,31 @@ def compute_F(responses, horizons, phi, theta, gmst, nifos):
         Source polar angle.
     gmst : float
         Greenwich mean sidereal time.
-
     Returns
     -------
     array
         Complex response factors for each detector.
     """
-
-    def body(i):
-        val = antenna_factor(responses[i], phi, jnp.pi / 2 - theta, gmst)
-        val *= horizons[i]
-        return jnp.where(i < nifos, val, 0)
-
-    return vmap(lambda i: body(i))(jnp.arange(responses.shape[0]))
+    dec = jnp.pi / 2 - theta
+    gha = gmst - phi
+    cosgha = jnp.cos(gha)
+    singha = jnp.sin(gha)
+    cosdec = jnp.cos(dec)
+    sindec = jnp.sin(dec)
+    
+    X = jnp.array([-singha, -cosgha, 0.0])
+    Y = jnp.array([-cosgha * sindec, singha * sindec, cosdec])
+    
+    DX = jnp.sum(responses * X[None, None, :], axis=2)  
+    DY = jnp.sum(responses * Y[None, None, :], axis=2)  
+    
+    vals = jnp.sum((X[None, :] * DX - Y[None, :] * DY) + 
+                   (X[None, :] * DY + Y[None, :] * DX) * 1j, axis=1)
+    
+    vals *= horizons
+    
+    mask = jnp.arange(responses.shape[0]) < nifos
+    return jnp.where(mask, vals, 0)
 
 
 @jit
