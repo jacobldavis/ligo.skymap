@@ -28,7 +28,12 @@ from ligo.skymap.jaxcore.cosmology import (
     dVC_dVL_tmax,
     dVC_dVL_tmin,
 )
-from ligo.skymap.jaxcore.interp import bicubic_interp, cubic_interp
+from ligo.skymap.jaxcore.interp import (
+    bicubic_interp_eval,
+    bicubic_interp_init,
+    cubic_interp_eval,
+    cubic_interp_init,
+)
 
 # --- COSMOLOGY ---
 
@@ -318,7 +323,7 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     return jnp.log(result) + log_offset
 
 
-class log_radial_integrator:
+def integrator_init(r1, r2, k, cosmology, pmax, size):
     """Adaptive log-domain radial integral evaluator using interpolation.
 
     Parameters
@@ -341,81 +346,87 @@ class log_radial_integrator:
     region1, region2 : cubic_interp
         1D interpolation over boundaries of region0.
     """
+    # Initialize constant values
+    alpha = 4
+    p0 = jnp.where(k >= 0, 0.5 * r2, 0.5 * r1)
+    xmax = jnp.log(pmax)
+    x0 = jnp.where(jnp.log(p0) > xmax, jnp.log(p0), xmax)
+    xmin = x0 - (1 + jnp.sqrt(2)) * alpha
+    ymax = x0 + alpha
+    ymin = 2 * x0 - jnp.sqrt(2) * alpha - xmax
+    d = (xmax - xmin) / (size - 1)
+    umin = -(1 + 1 / jnp.sqrt(2)) * alpha
+    vmax = x0 - (1 / jnp.sqrt(2)) * alpha
+    k1 = k + 1
+    r2 = jnp.where(1e-12 > r2, 1e-12, r2)
+    r1 = jnp.where(1e-12 > r1, 1e-12, r1)
+    p0_limit = jnp.where(
+        k == -1,
+        jnp.log(jnp.log(r2 / r1)),
+        jnp.log((jnp.power(r2, k1) - jnp.power(r1, k1)) / (k1)),
+    )
 
-    def __init__(self, r1, r2, k, cosmology, pmax, size):
-        # Initialize constant values
-        alpha = 4
-        p0 = jnp.where(k >= 0, 0.5 * r2, 0.5 * r1)
-        xmax = jnp.log(pmax)
-        x0 = jnp.where(jnp.log(p0) > xmax, jnp.log(p0), xmax)
-        xmin = x0 - (1 + jnp.sqrt(2)) * alpha
-        self.ymax = x0 + alpha
-        ymin = 2 * x0 - jnp.sqrt(2) * alpha - xmax
-        d = (xmax - xmin) / (size - 1)
-        umin = -(1 + 1 / jnp.sqrt(2)) * alpha
-        self.vmax = x0 - (1 / jnp.sqrt(2)) * alpha
-        k1 = k + 1
-        r2 = jnp.where(1e-12 > r2, 1e-12, r2)
-        r1 = jnp.where(1e-12 > r1, 1e-12, r1)
-        self.p0_limit = jnp.where(
-            k == -1,
-            jnp.log(jnp.log(r2 / r1)),
-            jnp.log((jnp.power(r2, k1) - jnp.power(r1, k1)) / (k1)),
-        )
-
-        # Create data arrays for initializing interps
-        z0 = vmap(
-            lambda ix: vmap(
-                lambda iy: log_radial_integral(
-                    xmin, ymin, ix, iy, d, r1, r2, k, cosmology
-                )
-            )(jnp.arange(size))
+    # Create data arrays for initializing interps
+    z0 = vmap(
+        lambda ix: vmap(
+            lambda iy: log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology)
         )(jnp.arange(size))
-        z0_flat = jnp.ravel(z0)
+    )(jnp.arange(size))
+    z0_flat = jnp.ravel(z0)
 
-        # Initialize the interps
-        self.region0 = bicubic_interp(z0_flat, size, size, xmin, ymin, d, d)
-        z1 = vmap(lambda i: z0[i][size - 1])(jnp.arange(size))
-        self.region1 = cubic_interp(z1, size, xmin, d)
-        z2 = vmap(lambda i: z0[i][size - 1 - i])(jnp.arange(size))
-        self.region2 = cubic_interp(z2, size, umin, d)
+    # Initialize the interps
+    region0 = bicubic_interp_init(z0_flat, size, size, xmin, ymin, d, d)
+    z1 = vmap(lambda i: z0[i][size - 1])(jnp.arange(size))
+    region1 = cubic_interp_init(z1, size, xmin, d)
+    z2 = vmap(lambda i: z0[i][size - 1 - i])(jnp.arange(size))
+    region2 = cubic_interp_init(z2, size, umin, d)
 
-    @staticmethod
-    @jit
-    def integrator_eval(region0, region1, region2, limits, p, b, log_p, log_b):
-        """Evaluate integral at (p, b) using precomputed interpolants.
+    # Return interpolants and limits
+    regions = (region0, region1, region2)
+    limits = (p0_limit, vmax, ymax)
 
-        Parameters
-        ----------
-        region0, region1, region2 : tuple
-            Interpolator parameters for interior and boundary.
-        limits : tuple
-            (p0_limit, vmax, ymax) bounding behavior for fallback cases.
-        p, b : float
-            Parameters.
-        log_p, log_b : float
-            Precomputed logarithms of p and b.
+    return regions, limits
 
-        Returns
-        -------
-        float
-            Approximation of the log integral value.
-        """
-        fx, x0, xlength, a = region0
-        f1, t01, length1, a1 = region1
-        f2, t02, length2, a2 = region2
-        p0_limit, vmax, ymax = limits
-        x = log_p
-        y = jnp.log(2) + 2 * log_p - log_b
-        result = jnp.pow(0.5 * b / p, 2)
-        result += jnp.where(
-            y >= ymax,
-            cubic_interp.cubic_interp_eval_jax(x, f1, t01, length1, a1),
-            jnp.where(
-                (0.5 * (x + y)) <= vmax,
-                cubic_interp.cubic_interp_eval_jax(0.5 * (x - y), f2, t02, length2, a2),
-                bicubic_interp.bicubic_interp_eval_jax(x, y, fx, x0, xlength, a),
-            ),
-        )
 
-        return jnp.where(p > 0, result, p0_limit)
+@staticmethod
+@jit
+def integrator_eval(region0, region1, region2, limits, p, b, log_p, log_b):
+    """Evaluate integral at (p, b) using precomputed interpolants.
+
+    Parameters
+    ----------
+    region0, region1, region2 : tuple
+        Interpolator parameters for interior and boundary.
+    limits : tuple
+        (p0_limit, vmax, ymax) bounding behavior for fallback cases.
+    p, b : float
+        Parameters.
+    log_p, log_b : float
+        Precomputed logarithms of p and b.
+
+    Returns
+    -------
+    float
+        Approximation of the log integral value.
+    """
+    # Unpack values
+    fx, x0, xlength, a = region0
+    f1, t01, length1, a1 = region1
+    f2, t02, length2, a2 = region2
+    p0_limit, vmax, ymax = limits
+
+    # Evaluate interpolant
+    x = log_p
+    y = jnp.log(2) + 2 * log_p - log_b
+    result = jnp.pow(0.5 * b / p, 2)
+    result += jnp.where(
+        y >= ymax,
+        cubic_interp_eval(x, f1, t01, length1, a1),
+        jnp.where(
+            (0.5 * (x + y)) <= vmax,
+            cubic_interp_eval(0.5 * (x - y), f2, t02, length2, a2),
+            bicubic_interp_eval(x, y, fx, x0, xlength, a),
+        ),
+    )
+
+    return jnp.where(p > 0, result, p0_limit)

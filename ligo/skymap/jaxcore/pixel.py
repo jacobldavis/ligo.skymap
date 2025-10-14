@@ -21,69 +21,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jit, vmap
 
-from ligo.skymap.jaxcore.integrate import log_radial_integrator
+from ligo.skymap.jaxcore.integrate import integrator_eval
 from ligo.skymap.jaxcore.moc import ang2vec, ntwopsi, nu, uniq2ang64
-
-
-def extract_integrator_regions(integrators):
-    """
-    Extract region parameters from each log_radial_integrator.
-
-    Parameters
-    ----------
-    integrators : list
-        List of log_radial_integrator objects.
-
-    Returns
-    -------
-    list of tuples
-        Each tuple contains region0, region1, and region2 parameters.
-    """
-    result = []
-    for integrator in integrators:
-        result.append(
-            (
-                (
-                    integrator.region0.fx,
-                    integrator.region0.x0,
-                    integrator.region0.xlength,
-                    integrator.region0.a,
-                ),
-                (
-                    integrator.region1.f,
-                    integrator.region1.t0,
-                    integrator.region1.length,
-                    integrator.region1.a,
-                ),
-                (
-                    integrator.region2.f,
-                    integrator.region2.t0,
-                    integrator.region2.length,
-                    integrator.region2.a,
-                ),
-            )
-        )
-    return result
-
-
-def extract_integrator_limits(integrators):
-    """
-    Extract the p0_limit, vmax, and ymax constants for each integrator.
-
-    Parameters
-    ----------
-    integrators : list
-        List of log_radial_integrator objects.
-
-    Returns
-    -------
-    list of tuples
-        Each tuple contains (p0_limit, vmax, ymax).
-    """
-    result = []
-    for integrator in integrators:
-        result.append((integrator.p0_limit, integrator.vmax, integrator.ymax))
-    return result
 
 
 @partial(jit, static_argnames=["nu"])
@@ -137,18 +76,20 @@ def compute_F(responses, horizons, phi, theta, gmst, nifos):
     singha = jnp.sin(gha)
     cosdec = jnp.cos(dec)
     sindec = jnp.sin(dec)
-    
+
     X = jnp.array([-singha, -cosgha, 0.0])
     Y = jnp.array([-cosgha * sindec, singha * sindec, cosdec])
-    
-    DX = jnp.sum(responses * X[None, None, :], axis=2)  
-    DY = jnp.sum(responses * Y[None, None, :], axis=2)  
-    
-    vals = jnp.sum((X[None, :] * DX - Y[None, :] * DY) + 
-                   (X[None, :] * DY + Y[None, :] * DX) * 1j, axis=1)
-    
+
+    DX = jnp.sum(responses * X[None, None, :], axis=2)
+    DY = jnp.sum(responses * Y[None, None, :], axis=2)
+
+    vals = jnp.sum(
+        (X[None, :] * DX - Y[None, :] * DY) + (X[None, :] * DY + Y[None, :] * DX) * 1j,
+        axis=1,
+    )
+
     vals *= horizons
-    
+
     mask = jnp.arange(responses.shape[0]) < nifos
     return jnp.where(mask, vals, 0)
 
@@ -468,7 +409,7 @@ def bsm_pixel_prob_jax(
     iu_flat = iu_grid.ravel()
     isample_flat = isample_grid.ravel()
 
-    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+    val = u_points_weights[iu_flat, 1] + integrator_eval(
         integrators[0][0][0],
         integrators[0][0][1],
         integrators[0][0][2],
@@ -571,7 +512,7 @@ def bsm_pixel_dist_jax(
     iu_flat = iu_grid.ravel()
     isample_flat = isample_grid.ravel()
 
-    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+    val = u_points_weights[iu_flat, 1] + integrator_eval(
         integrators[0][1][0],
         integrators[0][1][1],
         integrators[0][1][2],
@@ -584,7 +525,7 @@ def bsm_pixel_dist_jax(
     accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
     accum1 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
 
-    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+    val = u_points_weights[iu_flat, 1] + integrator_eval(
         integrators[0][2][0],
         integrators[0][2][1],
         integrators[0][2][2],
@@ -685,7 +626,7 @@ def bsm_pixel_accum_jax(
     iu_flat = iu_grid.ravel()
     isample_flat = isample_grid.ravel()
 
-    val = u_points_weights[iu_flat, 1] + log_radial_integrator.integrator_eval(
+    val = u_points_weights[iu_flat, 1] + integrator_eval(
         integrators[0][0][0],
         integrators[0][0][1],
         integrators[0][0][2],

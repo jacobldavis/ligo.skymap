@@ -32,13 +32,73 @@ from ligo.skymap.jaxcore.pixel import (
     bsm_pixel_accum_jax,
     bsm_pixel_dist_jax,
     bsm_pixel_prob_jax,
-    extract_integrator_limits,
-    extract_integrator_regions,
-    log_radial_integrator,
+    integrator_eval,
+    integrator_init,
 )
 
 _MAX_NIFOS = 5
 _MAX_NSAMPLES = 1000
+
+
+def extract_integrator_regions(integrators):
+    """
+    Extract region parameters from each log_radial_integrator.
+
+    Parameters
+    ----------
+    integrators : list
+        List of log_radial_integrator objects.
+
+    Returns
+    -------
+    list of tuples
+        Each tuple contains region0, region1, and region2 parameters.
+    """
+    result = []
+    for integrator in integrators:
+        result.append(
+            (
+                (
+                    integrator.region0.fx,
+                    integrator.region0.x0,
+                    integrator.region0.xlength,
+                    integrator.region0.a,
+                ),
+                (
+                    integrator.region1.f,
+                    integrator.region1.t0,
+                    integrator.region1.length,
+                    integrator.region1.a,
+                ),
+                (
+                    integrator.region2.f,
+                    integrator.region2.t0,
+                    integrator.region2.length,
+                    integrator.region2.a,
+                ),
+            )
+        )
+    return result
+
+
+def extract_integrator_limits(integrators):
+    """
+    Extract the p0_limit, vmax, and ymax constants for each integrator.
+
+    Parameters
+    ----------
+    integrators : list
+        List of log_radial_integrator objects.
+
+    Returns
+    -------
+    list of tuples
+        Each tuple contains (p0_limit, vmax, ymax).
+    """
+    result = []
+    for integrator in integrators:
+        result.append((integrator.p0_limit, integrator.vmax, integrator.ymax))
+    return result
 
 
 @jit
@@ -243,7 +303,7 @@ def bsm_jax(
     # Initialize integrators
     pmax = jnp.sqrt(0.5 * jnp.sum(jnp.square(horizons))) * rescale_loglikelihood
     integrators = [
-        log_radial_integrator(
+        integrator_init(
             min_distance,
             max_distance,
             prior_distance_power + k,
@@ -253,8 +313,7 @@ def bsm_jax(
         )
         for k in range(3)
     ]
-    regions = extract_integrator_regions(integrators)
-    limits = extract_integrator_limits(integrators)
+    regions, limits = zip(*integrators)
     integrators_values = (regions, limits)
 
     # Initialize pixels
@@ -269,13 +328,12 @@ def bsm_jax(
 
     # Compute the coherent probability map
     # and incoherent evidence at the lowest order
-    i = integrators
     log_norm = -jnp.log(2 * (2 * jnp.pi) * (4 * jnp.pi) * ntwopsi * snrs.shape[1])
-    log_norm -= log_radial_integrator.integrator_eval(
+    log_norm -= integrator_eval(
         regions[0][0],
         regions[0][1],
         regions[0][2],
-        (i[0].p0_limit, i[0].vmax, i[0].ymax),
+        limits[0],
         0,
         0,
         -jnp.inf,

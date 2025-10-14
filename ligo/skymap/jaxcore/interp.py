@@ -21,6 +21,7 @@ from jax import jit, vmap
 
 ETA = 0.01
 
+
 @jit
 def nan_or_inf(x):
     return jnp.isnan(x) | jnp.isinf(x)
@@ -29,6 +30,7 @@ def nan_or_inf(x):
 # --- CUBIC INTERP ---
 
 
+@partial(jit, static_argnames=["n"])
 def cubic_interp_init(data, n, tmin, dt):
     """1D cubic interpolation using precomputed coefficients.
 
@@ -58,7 +60,8 @@ def cubic_interp_init(data, n, tmin, dt):
     t0 = 3 - f * tmin
     length = n + 6
     a = vmap(lambda idx: compute_cubic_coeffs(idx, data, n))(jnp.arange(n + 6))
-    return f, t0, length, a
+    return (f, t0, length, a)
+
 
 @staticmethod
 @jit
@@ -106,6 +109,7 @@ def compute_cubic_coeffs(idx, data, n):
             jnp.where(bad12, z[1], jnp.where(bad03, z[1], a3)),
         ]
     )
+
 
 @staticmethod
 @jit
@@ -226,6 +230,7 @@ def compute_bicubic_coeffs(data, ns, nt):
     return blocks.reshape(length_s * length_t, 4, 4)
 
 
+@partial(jit, static_argnames=["ns", "nt"])
 def bicubic_interp_init(data, ns, nt, smin, tmin, ds, dt):
     """2D bicubic interpolation using precomputed coefficients.
 
@@ -255,7 +260,8 @@ def bicubic_interp_init(data, ns, nt, smin, tmin, ds, dt):
     x0 = jnp.array([3 - fx[0] * smin, 3 - fx[1] * tmin])
     xlength = jnp.array([ns + 6, nt + 6])
     a = compute_bicubic_coeffs(data, ns, nt)
-    return fx, x0, xlength, a
+    return (fx, x0, xlength, a)
+
 
 @staticmethod
 @jit
