@@ -21,6 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jit, lax, vmap
 
+from ligo.skymap.jaxcore.integrate import integrator_eval, integrator_init
 from ligo.skymap.jaxcore.moc import (
     default_log_radial_integrator_size,
     nest2uniq64,
@@ -32,8 +33,6 @@ from ligo.skymap.jaxcore.pixel import (
     bsm_pixel_accum_jax,
     bsm_pixel_dist_jax,
     bsm_pixel_prob_jax,
-    integrator_eval,
-    integrator_init,
 )
 
 _MAX_NIFOS = 5
