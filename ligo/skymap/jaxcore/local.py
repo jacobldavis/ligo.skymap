@@ -64,45 +64,6 @@ def logsumexp(accum, log_weight):
 
 
 @partial(jit, static_argnames=["last_n"])
-def bayestar_pixels_refine_core(pixels, last_n, new_pixels):
-    """
-    Refine pixels by splitting the last_n entries into 4 child pixels each.
-
-    Parameters
-    ----------
-    pixels : array_like
-        Current array of pixels.
-    last_n : int
-        Number of pixels to refine.
-    new_pixels : array_like
-        Pre-allocated array of size `len(pixels) + 3*last_n`.
-
-    Returns
-    -------
-    tuple
-        Refined pixel array and its new length.
-    """
-    length = pixels.shape[0]
-    new_length = new_pixels.shape[0]
-    prefix_len = length - last_n
-
-    pixels_prefix = lax.dynamic_slice(pixels, (0, 0), (prefix_len, 4))
-    new_pixels = lax.dynamic_update_slice(new_pixels, pixels_prefix, (0, 0))
-
-    def refine_loop(i, new_pixels):
-        base_uniq = 4 * pixels[length - i - 1, 0]
-        child_uniqs = jnp.arange(4, dtype=pixels.dtype) + base_uniq
-        child_aux = jnp.zeros((4, 3), dtype=pixels.dtype)
-        new_children = jnp.concatenate([child_uniqs[:, None], child_aux], axis=1)
-
-        dest_idx = new_length - 4 * i - 4
-        new_pixels = lax.dynamic_update_slice(new_pixels, new_children, (dest_idx, 0))
-        return new_pixels
-
-    new_pixels = lax.fori_loop(0, last_n, refine_loop, new_pixels)
-    return new_pixels, new_length
-
-
 def bayestar_pixels_refine(pixels, last_n):
     """
     Allocates new space for the core function.
@@ -120,9 +81,22 @@ def bayestar_pixels_refine(pixels, last_n):
         Refined pixel array and new length.
     """
     length = pixels.shape[0]
+    prefix_len = length - last_n
+    parent_start_idx = prefix_len
+
+    parent_indices = jnp.arange(last_n) + parent_start_idx
+    parent_uniqs = pixels[parent_indices, 0]
+
+    # Generate all children
+    child_uniqs = (4 * parent_uniqs[:, None] + jnp.arange(4)).ravel()
+    child_pixels = jnp.column_stack(
+        [child_uniqs, jnp.zeros((4 * last_n, 3), dtype=pixels.dtype)]
+    )
+
+    result = jnp.concatenate([pixels[:prefix_len], child_pixels], axis=0)
     new_length = length + 3 * last_n
-    new_pixels = jnp.zeros((new_length, 4), dtype=pixels.dtype)
-    return bayestar_pixels_refine_core(pixels, last_n, new_pixels)
+
+    return result, new_length
 
 
 @jit
