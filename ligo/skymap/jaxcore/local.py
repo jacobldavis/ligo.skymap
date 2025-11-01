@@ -17,6 +17,7 @@
 
 from functools import partial
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import jit, lax, vmap
@@ -34,6 +35,9 @@ from ligo.skymap.jaxcore.pixel import (
     bsm_pixel_dist_jax,
     bsm_pixel_prob_jax,
 )
+
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+
 
 _MAX_NIFOS = 5
 _MAX_NSAMPLES = 1000
