@@ -289,13 +289,15 @@ def bsm_jax(
         )
 
     def run_all_vmap(pixels, accum):
-        pixels_new_rows = vmap(lambda px_row: update_pixel_row(px_row))(pixels)
+        pixels_new_rows = lax.map(
+            lambda px_row: update_pixel_row(px_row), pixels, batch_size=bs
+        )
         pixels = pixels.at[:].set(pixels_new_rows)
 
         def update_incoherent(px):
             return vmap(lambda i: update_acc_row(px, i))(jnp.arange(epochs.shape[0]))
 
-        accum = vmap(update_incoherent)(pixels)
+        accum = lax.map(update_incoherent, pixels, batch_size=bs)
 
         return pixels, accum
 
@@ -311,7 +313,9 @@ def bsm_jax(
         pixels, length = bayestar_pixels_refine(pixels, npix0 // 4)
 
         new_rows = pixels[-(npix0):]
-        updated_rows = vmap(lambda px_row: update_pixel_row(px_row))(new_rows)
+        updated_rows = lax.map(
+            lambda px_row: update_pixel_row(px_row), new_rows, batch_size=bs
+        )
         pixels = pixels.at[-(npix0):].set(updated_rows)
 
         pixels = bayestar_pixels_sort_prob(pixels)
@@ -343,7 +347,7 @@ def bsm_jax(
             rescale_loglikelihood,
         )
 
-    distance_rows = vmap(update_distance_row)(pixels)
+    distance_rows = lax.map(update_distance_row, pixels, batch_size=bs)
     pixels = pixels.at[:].set(distance_rows)
 
     # --- DONE SECTION ---
