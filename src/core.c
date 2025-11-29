@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2024  Leo Singer
+ * Copyright (C) 2013-2025  Leo Singer
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -927,9 +927,16 @@ fail: /* Cleanup */
 static void log_posterior_toa_phoa_snr_loop(
     char **args, const npy_intp *dimensions, const npy_intp *steps, void *NPY_UNUSED(data))
 {
-    const npy_intp n = dimensions[0],
-               nifos = dimensions[1],
-            nsamples = dimensions[2];
+    /* FIXME: initializing these symbols as const results in an internal
+     * compiler error on GCC on macOS. As a temporary workaround, remove the
+     * const.
+     *
+     * See https://git.ligo.org/lscsoft/ligo.skymap/-/issues/59.
+     */
+
+    /* const */ npy_intp n = dimensions[0],
+                     nifos = dimensions[1],
+                  nsamples = dimensions[2];
 
     /* Check core dimensions. */
     assert(dimensions[3] == 2);

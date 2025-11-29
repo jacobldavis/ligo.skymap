@@ -7,6 +7,12 @@ Changelog
 
 - No changes yet.
 
+2.4.2 (2025-11-25)
+==================
+
+- Fix an API incompatibility with the igwn_ligolw Python package that affected
+  the ``bayestar_inject`` command. Thanks to Ramodgwendé Weizmann Kiendrébéogo!
+
 2.4.1 (2025-09-03)
 ==================
 
