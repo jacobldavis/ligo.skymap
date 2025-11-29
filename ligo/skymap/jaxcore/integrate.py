@@ -35,7 +35,7 @@ from ligo.skymap.jaxcore.interp import (
     cubic_interp_init,
 )
 
-# --- COSMOLOGY ---
+# --- COSMOLOGY (EXPERIMENTAL) ---
 
 
 @jit
@@ -161,7 +161,7 @@ def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     Parameters
     ----------
     r : float
-        Luminosity distance.
+        Radial distance.
     p, b, k : float
         Constants of the integrand.
     cosmology : bool
@@ -177,8 +177,6 @@ def log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     -------
     float
         Log of the radial integrand.
-
-    NOTE: cosmology is temporarily disabled to increase runtimes
     """
     ret = jnp.log(i0e(b / r) * jnp.pow(r, k)) + scale - jnp.pow(p / r - 0.5 * b / p, 2)
     return ret
@@ -191,9 +189,9 @@ def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     Parameters
     ----------
     r : float
-        Radial distance (Mpc).
+        Radial distance.
     p, b, k : float
-        Model parameters.
+        Constants of the integrand.
     cosmology : bool
         Whether to include cosmology.
     x_knots, coeffs : array_like, tuple
@@ -205,8 +203,6 @@ def radial_integrand(r, p, b, k, cosmology, x_knots, coeffs, scale=0):
     -------
     float
         Value of the integrand at r.
-
-    NOTE: cosmology is temporarily disabled to improve runtimes
     """
     ret = scale - jnp.pow(p / r - 0.5 * b / p, 2)
     multiplier = i0e(b / r) * jnp.power(r, k)
@@ -235,11 +231,11 @@ def compute_breakpoints(p, b, r1, r2):
     pinv = 1.0 / p
     log_eta = jnp.log(eta)
 
+    # Compute middle, left, right breakpoints
     middle = 2 * p**2 / b
     left = 1.0 / (1.0 / middle + jnp.sqrt(-log_eta) * pinv)
     right = 1.0 / (1.0 / middle - jnp.sqrt(-log_eta) * pinv)
 
-    # Start with r1
     breakpoints = jnp.full((5,), 0)
     breakpoints = breakpoints.at[0].set(r1)
     n = 1
@@ -250,7 +246,6 @@ def compute_breakpoints(p, b, r1, r2):
         n = n + cond
         return bp, n
 
-    # Only do this branch if b != 0
     def with_b_nonzero(args):
         bp, n = args
         bp, n = try_add(bp, left, n)
@@ -266,6 +261,7 @@ def compute_breakpoints(p, b, r1, r2):
         n = n + 1
         return bp, n
 
+    # Calculate breakpoints based on b value
     breakpoints, nbreakpoints = lax.cond(
         b != 0, with_b_nonzero, with_b_zero, operand=(breakpoints, n)
     )
@@ -309,6 +305,7 @@ def log_radial_integral(xmin, ymin, ix, iy, d, r1, r2, k, cosmology):
     def log_integrand(r):
         return log_radial_integrand(r, p, b, k, cosmology, x_knots, coeffs)
 
+    # Compute log values at breakpoints
     log_vals = vmap(log_integrand)(breakpoints)
     log_vals = jnp.where(jnp.isnan(log_vals), -jnp.inf, log_vals)
     log_offset = jnp.max(log_vals)
@@ -333,7 +330,7 @@ def integrator_init(r1, r2, k, cosmology, pmax, size):
     k : float
         Exponent for radial power-law.
     cosmology : bool
-        If True, include comoving volume factor.
+        Whether to apply cosmological volume correction.
     pmax : float
         Maximum value of parameter p.
     size : int

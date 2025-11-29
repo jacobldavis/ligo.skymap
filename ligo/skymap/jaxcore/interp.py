@@ -32,7 +32,11 @@ def nan_or_inf(x):
 
 @partial(jit, static_argnames=["n"])
 def cubic_interp_init(data, n, tmin, dt):
-    """1D cubic interpolation using precomputed coefficients.
+    """Create a 1D piecewise cubic interpolating function.
+
+    The interpolating function y=f(x) passes through the data points
+    (x[i], y[i]) for all i from 0 to n-1, where x[i] = tmin + i * dt and
+    y[i] = data[i].
 
     Parameters
     ----------
@@ -45,16 +49,17 @@ def cubic_interp_init(data, n, tmin, dt):
     dt : float
         Spacing between samples.
 
-    Attributes
+    Returns
     ----------
-    f : float
-        Inverse of dt, used for scaling.
-    t0 : float
-        Precomputed shift constant.
-    length : int
-        Length of the padded coefficient array.
-    a : jax.numpy.ndarray
-        Array of shape (n+6, 4) containing cubic coefficients.
+    tuple
+        f : float
+            Inverse of dt, used for scaling.
+        t0 : float
+            Precomputed shift constant.
+        length : int
+            Length of the padded coefficient array.
+        a : jax.np.ndarray
+            Array of shape (n+6, 4) containing cubic coefficients.
     """
     f = 1 / dt
     t0 = 3 - f * tmin
@@ -79,7 +84,7 @@ def compute_cubic_coeffs(idx, data, n):
 
     Returns
     -------
-    coeffs : jax.numpy.ndarray
+    coeffs : jax.np.ndarray
         Array of cubic coefficients, shape (4).
     """
     # Clip indices and build z
@@ -114,7 +119,7 @@ def compute_cubic_coeffs(idx, data, n):
 @staticmethod
 @jit
 def cubic_interp_eval(data, f, t0, length, a):
-    """Evaluate interpolated values for input points using coefficients.
+    """Evaluate a piecewise cubic interpolating function.
 
     Parameters
     ----------
@@ -232,7 +237,11 @@ def compute_bicubic_coeffs(data, ns, nt):
 
 @partial(jit, static_argnames=["ns", "nt"])
 def bicubic_interp_init(data, ns, nt, smin, tmin, ds, dt):
-    """2D bicubic interpolation using precomputed coefficients.
+    """Create a 2D piecewise bicubic interpolating function.
+
+    The interpolating function z=f(x, y) passes through the data points
+    (x[i], y[j], z[i, j]) for all i from 0 to ns - 1 and all j from 0 to nt - 1,
+    where x[i] = smin + i * ds, y[j] = tmin + j * dt, and z[i, j] = data[i, j].
 
     Parameters
     ----------
@@ -266,7 +275,7 @@ def bicubic_interp_init(data, ns, nt, smin, tmin, ds, dt):
 @staticmethod
 @jit
 def bicubic_interp_eval(s, t, fx, x0, xlength, a):
-    """Evaluate bicubic interpolation at point(s) (s, t).
+    """Evaluate a piecewise bicubic interpolating function.
 
     Parameters
     ----------

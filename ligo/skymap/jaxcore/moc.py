@@ -24,14 +24,14 @@ nu = 10
 
 
 def ang2vec(theta, phi):
-    """Convert spherical coordinates to 3D Cartesian vector.
+    """Convert spherical coordinates to 3D position vector.
 
     Parameters
     ----------
     theta : float
-        Polar angle in radians.
+        Colatitude in radians measured southward from north pole
     phi : float
-        Azimuthal angle in radians.
+        longitude in radians measured eastward.
 
     Returns
     -------
@@ -83,7 +83,7 @@ def uniq2order64(uniq):
 
 @jit
 def uniq2pixarea64(uniq):
-    """Compute pixel area in steradians from a UNIQ64 index.
+    """Compute pixel area from a UNIQ64 index.
 
     Parameters
     ----------
@@ -93,7 +93,7 @@ def uniq2pixarea64(uniq):
     Returns
     -------
     float
-        Pixel area in steradians.
+        Pixel area.
     """
     order = uniq2order64(uniq)
     return jnp.where(order < 0, jnp.nan, jnp.ldexp(jnp.pi / 3, -2 * order))
@@ -208,7 +208,7 @@ def nest2xyf64(nside, pix, ctab):
     Parameters
     ----------
     nside : int
-        HEALPix resolution parameter.
+        HEALPix resolution.
     pix : int
         Pixel index in NESTED scheme.
     ctab : array_like
@@ -238,7 +238,7 @@ def pix2ang_nest_z_phi64(nside, pix, ctab, jrll, jpll):
     Parameters
     ----------
     nside : int
-        HEALPix resolution parameter.
+        HEALPix resolution.
     pix : int
         NESTED pixel index.
     ctab : array_like

@@ -211,10 +211,6 @@ def bsm_jax(
     -------
     tuple
         Pixel array with posterior, mean, std distance + log Bayes factors.
-
-    NOTE: We use jax.lax.map to avoid overallocating memory in some cases.
-          Tune the bs parameter (batch_size)
-          or swap lax.map to vmap to increase performance.
     """
     # Initialize integrators
     pmax = jnp.sqrt(0.5 * jnp.sum(jnp.square(horizons))) * rescale_loglikelihood
@@ -293,15 +289,13 @@ def bsm_jax(
         )
 
     def run_all_vmap(pixels, accum):
-        pixels_new_rows = lax.map(
-            lambda px_row: update_pixel_row(px_row), pixels, batch_size=bs
-        )
+        pixels_new_rows = vmap(lambda px_row: update_pixel_row(px_row))(pixels)
         pixels = pixels.at[:].set(pixels_new_rows)
 
         def update_incoherent(px):
             return vmap(lambda i: update_acc_row(px, i))(jnp.arange(epochs.shape[0]))
 
-        accum = lax.map(update_incoherent, pixels, batch_size=bs)
+        accum = vmap(update_incoherent)(pixels)
 
         return pixels, accum
 
@@ -317,9 +311,7 @@ def bsm_jax(
         pixels, length = bayestar_pixels_refine(pixels, npix0 // 4)
 
         new_rows = pixels[-(npix0):]
-        updated_rows = lax.map(
-            lambda px_row: update_pixel_row(px_row), new_rows, batch_size=bs
-        )
+        updated_rows = vmap(lambda px_row: update_pixel_row(px_row))(new_rows)
         pixels = pixels.at[-(npix0):].set(updated_rows)
 
         pixels = bayestar_pixels_sort_prob(pixels)
@@ -351,7 +343,7 @@ def bsm_jax(
             rescale_loglikelihood,
         )
 
-    distance_rows = lax.map(update_distance_row, pixels, batch_size=bs)
+    distance_rows = vmap(update_distance_row)(pixels)
     pixels = pixels.at[:].set(distance_rows)
 
     # --- DONE SECTION ---

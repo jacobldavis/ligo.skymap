@@ -19,7 +19,7 @@ from functools import partial
 
 import jax.numpy as jnp
 import numpy as np
-from jax import jit
+from jax import jit, vmap
 
 from ligo.skymap.jaxcore.integrate import integrator_eval
 from ligo.skymap.jaxcore.moc import ang2vec, ntwopsi, nu, uniq2ang64
@@ -52,7 +52,9 @@ u_points_weights = u_points_weights_init(nu)
 @jit
 def compute_F(responses, horizons, phi, theta, gmst, nifos):
     """
-    Compute the complex antenna response F for each interferometer.
+    Compute antenna factors from the detector response tensor and source
+    sky location, and return as complex number(s) F_plus + i F_cross.
+
     Parameters
     ----------
     responses : array_like
@@ -107,8 +109,6 @@ def toa_errors(theta, phi, gmst, locs, toas):
         Sky coordinates.
     gmst : float
         Greenwich mean sidereal time.
-    nifos : int
-        Number of detectors.
     locs : array_like
         Detector locations.
     toas : array_like
@@ -189,78 +189,123 @@ def compute_snrs_interp(snrs, dt, sample_rate, nsamples):
     return result.T
 
 
-@partial(jit, static_argnames=["ntwopsi"])
-def compute_twopsi_slice(F, snrs_interp, ntwopsi, rescale_loglikelihood):
+@jit
+def compute_accum_logsumexp(accum_flat):
     """
-    Evaluate marginalized likelihood for all inclination angles at a fixed 2ψ.
+    Compute log-sum-exp.
 
     Parameters
     ----------
-    F : array_like
-        Antenna response.
-    snrs_interp : array_like
-        Interpolated SNR values.
-    ntwopsi : int
-        Total number of polarization angles.
-    rescale_loglikelihood : float
-        Normalization constant.
+    accum_flat : array_like
+        Array of log-likelihood values to sum.
 
     Returns
     -------
-    tuple
-        Arrays of p, log(p), b values, and log(b) for each u.
+    float
+        log(sum(exp(accum_flat)))
+    """
+    max_val = jnp.max(accum_flat)
+    return jnp.log(jnp.sum(jnp.exp(accum_flat - max_val))) + max_val
+
+
+@partial(jit, static_argnames=["integrator_idx", "ntwopsi"])
+def compute_pixel_core(
+    integrators,
+    F,
+    snrs_interp,
+    integrator_idx,
+    ntwopsi,
+    rescale_loglikelihood,
+):
+    """
+     Compute likelihood for a single pixel.
+
+     Parameters
+     ----------
+     integrators : list
+         Tupled radial integrators (region functions and limits).
+     F : array_like
+         Complex antenna response factors for each detector, shape (nifo,).
+     snrs_interp : array_like
+         Interpolated SNR values at this sky position, shape (nsamples, nifo).s
+     responses : array_like
+         Detector tensor responses.
+    integrator_idx : int
+         Which integrator to use (0 for probability, 1-2 for distance moments).
+     ntwopsi : int
+         Number of polarization angles (typically 32).
+     rescale_loglikelihood : float
+         Factor for log-likelihood normalization.
+
+     Returns
+     -------
+     array_like
+         Log of the marginalized likelihood for this pixel.
+
     """
     twopsi_vals = (2 * jnp.pi / ntwopsi) * jnp.arange(ntwopsi)
     exp_i_twopsi_vals = jnp.exp(1j * twopsi_vals)
 
     u_vals = u_points_weights[:, 0]
     u2_vals = u_vals * u_vals
+    u_log_weights = u_points_weights[:, 1]
 
-    tmp = F[None, None, :] * jnp.conj(exp_i_twopsi_vals[:, None, None])
-    z_times_r = 0.5 * (1 + u2_vals[None, :, None]) * jnp.real(tmp) - 1j * u_vals[
-        None, :, None
-    ] * jnp.imag(tmp)
+    n_samples = snrs_interp.shape[0]
 
-    p2 = jnp.sum(jnp.real(z_times_r) ** 2 + jnp.imag(z_times_r) ** 2, axis=2)
-    p2 *= 0.5 * rescale_loglikelihood**2
-    p = jnp.sqrt(p2)
-    logp = jnp.log(p)
+    # Pre-compute antenna-response for all twopsi values
+    tmp = F[None, :] * jnp.conj(exp_i_twopsi_vals[:, None])
 
-    I0arg = jnp.sum(
-        jnp.conj(z_times_r[:, :, None, :]) * snrs_interp[None, None, :, :], axis=3
-    )
-    b = jnp.abs(I0arg) * rescale_loglikelihood**2
-    logb = jnp.log(b)
+    integrator_funcs = integrators[0][integrator_idx]
+    integrator_limits = integrators[1][integrator_idx]
 
-    return p, logp, b, logb
+    # Compute contribution for one (twopsi, u) pair across all samples
+    def compute_for_twopsi_u(twopsi_idx, u_idx):
+        """Compute contribution for one (twopsi, u) pair across all samples."""
+        u = u_vals[u_idx]
+        u2 = u2_vals[u_idx]
 
+        z_times_r = 0.5 * (1 + u2) * jnp.real(tmp[twopsi_idx]) - 1j * u * jnp.imag(
+            tmp[twopsi_idx]
+        )
 
-@jit
-def compute_accum(iint, accum):
-    """
-    Integrate over inclination and polarization to compute log-evidence.
+        p2 = jnp.sum(jnp.real(z_times_r) ** 2 + jnp.imag(z_times_r) ** 2)
+        p2 *= 0.5 * rescale_loglikelihood**2
+        p = jnp.sqrt(p2)
+        logp = jnp.log(p)
 
-    Parameters
-    ----------
-    iint : int
-        Index of the integrator region (0, 1, or 2).
-    accum : array_like
-        Array of log-integrands.
+        I0arg = jnp.sum(jnp.conj(z_times_r)[None, :] * snrs_interp, axis=1)
+        b = jnp.abs(I0arg) * rescale_loglikelihood**2
+        logb = jnp.log(b)
 
-    Returns
-    -------
-    float
-        Log of total accumulated value.
-    """
-    accum_iint = accum[iint]
-    accum_flat = accum_iint.reshape(-1)
+        p_broadcast = jnp.full(n_samples, p)
+        logp_broadcast = jnp.full(n_samples, logp)
 
-    max_accum = jnp.max(accum_flat)
+        # Evaluate integrator: shape (nsamples,)
+        val = integrator_eval(
+            integrator_funcs[0],
+            integrator_funcs[1],
+            integrator_funcs[2],
+            integrator_limits,
+            p_broadcast,
+            b,
+            logp_broadcast,
+            logb,
+        )
 
-    accum_exp = jnp.exp(accum_flat - max_accum)
-    accum1 = jnp.sum(accum_exp)
+        # Add quadrature weight: shape (nsamples,)
+        result = jnp.where(
+            jnp.isfinite(val), val + u_log_weights[u_idx], u_log_weights[u_idx]
+        )
 
-    return jnp.log(accum1) + max_accum
+        return compute_accum_logsumexp(result)
+
+    # Vectorize over u and twopsi
+    compute_u = vmap(lambda u_idx: compute_for_twopsi_u(0, u_idx))
+    compute_twopsi_u = vmap(lambda twopsi_idx: compute_u(jnp.arange(nu)), in_axes=(0,))
+
+    # Return final accumulated log-sum-exp
+    accum_reduced = compute_twopsi_u(jnp.arange(ntwopsi))
+    return compute_accum_logsumexp(accum_reduced.ravel())
 
 
 @jit
@@ -317,47 +362,16 @@ def bsm_pixel_prob_jax(
         Pixels row with updated probability.
 
     """
-    # Initialize starting values
     theta, phi = uniq2ang64(uniq)
-
-    # Look up antenna factors
     F = compute_F(responses, horizons, phi, theta, gmst, nifos)
-
-    # Compute dt
     dt = toa_errors(theta, phi, gmst, locations, epochs)
-
-    # Shift SNR time series by the time delay for this sky position
     snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
 
-    # Compute p and b values for all twopsi and u
-    p, log_p, b, log_b = compute_twopsi_slice(
-        F, snrs_interp, ntwopsi, rescale_loglikelihood
+    result = compute_pixel_core(
+        integrators, F, snrs_interp, 0, ntwopsi, rescale_loglikelihood
     )
 
-    # Initialize accum with the integrator evaluation
-    itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
-        jnp.arange(ntwopsi), jnp.arange(nu), jnp.arange(snrs.shape[1]), indexing="ij"
-    )
-    itwopsi_flat = itwopsi_grid.ravel()
-    iu_flat = iu_grid.ravel()
-    isample_flat = isample_grid.ravel()
-
-    val = u_points_weights[iu_flat, 1] + integrator_eval(
-        integrators[0][0][0],
-        integrators[0][0][1],
-        integrators[0][0][2],
-        integrators[1][0],
-        p[itwopsi_flat, iu_flat],
-        b[itwopsi_flat, iu_flat, isample_flat],
-        log_p[itwopsi_flat, iu_flat],
-        log_b[itwopsi_flat, iu_flat, isample_flat],
-    )
-    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
-    accum0 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
-    accum = jnp.array([accum0])
-
-    # Return updated pixel row
-    return px.at[1].set(compute_accum(0, accum))
+    return px.at[1].set(result)
 
 
 @jit
@@ -414,61 +428,20 @@ def bsm_pixel_dist_jax(
         Pixels row with updated distances.
 
     """
-    # Initialize starting values
     theta, phi = uniq2ang64(uniq)
-
-    # Look up antenna factors
     F = compute_F(responses, horizons, phi, theta, gmst, nifos)
-
-    # Compute dt
     dt = toa_errors(theta, phi, gmst, locations, epochs)
-
-    # Shift SNR time series by the time delay for this sky position
     snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
 
-    # Compute p and b values for all twopsi and u
-    p, log_p, b, log_b = compute_twopsi_slice(
-        F, snrs_interp, ntwopsi, rescale_loglikelihood
+    result1 = compute_pixel_core(
+        integrators, F, snrs_interp, 1, ntwopsi, rescale_loglikelihood
+    )
+    result2 = compute_pixel_core(
+        integrators, F, snrs_interp, 2, ntwopsi, rescale_loglikelihood
     )
 
-    # Initialize accum with the integrator evaluation
-    itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
-        jnp.arange(ntwopsi), jnp.arange(nu), jnp.arange(snrs.shape[1]), indexing="ij"
-    )
-    itwopsi_flat = itwopsi_grid.ravel()
-    iu_flat = iu_grid.ravel()
-    isample_flat = isample_grid.ravel()
-
-    val = u_points_weights[iu_flat, 1] + integrator_eval(
-        integrators[0][1][0],
-        integrators[0][1][1],
-        integrators[0][1][2],
-        integrators[1][1],
-        p[itwopsi_flat, iu_flat],
-        b[itwopsi_flat, iu_flat, isample_flat],
-        log_p[itwopsi_flat, iu_flat],
-        log_b[itwopsi_flat, iu_flat, isample_flat],
-    )
-    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
-    accum1 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
-
-    val = u_points_weights[iu_flat, 1] + integrator_eval(
-        integrators[0][2][0],
-        integrators[0][2][1],
-        integrators[0][2][2],
-        integrators[1][2],
-        p[itwopsi_flat, iu_flat],
-        b[itwopsi_flat, iu_flat, isample_flat],
-        log_p[itwopsi_flat, iu_flat],
-        log_b[itwopsi_flat, iu_flat, isample_flat],
-    )
-    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
-    accum2 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
-    accum = jnp.array([accum1, accum2])
-
-    # Return updated pixel row
-    px = px.at[2].set(compute_accum(0, accum))
-    px = px.at[3].set(compute_accum(1, accum))
+    px = px.at[2].set(result1)
+    px = px.at[3].set(result2)
     return px
 
 
@@ -496,6 +469,10 @@ def bsm_pixel_accum_jax(
         Tupled radial integrators (region functions and limits).
     uniq : int
         Uniq id of the pixel in the array.
+    iifo : int
+        Detector index.
+    px : array_like
+        Pixel row to modify.
     gmst : float
         Greenwich Mean Sidereal Time.
     nifos : int
@@ -522,44 +499,11 @@ def bsm_pixel_accum_jax(
     Scalar value for accum calculation
 
     """
-    # Initialize starting values
     theta, phi = uniq2ang64(uniq)
-
-    # Look up antenna factors
     F = compute_F(responses, horizons, phi, theta, gmst, nifos)
-
-    # Compute dt
     dt = toa_errors(theta, phi, gmst, locations, epochs)
-
-    # Shift SNR time series by the time delay for this sky position
     snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
 
-    # Compute p and b values for all twopsi and u
-    p, log_p, b, log_b = compute_twopsi_slice(
-        F, snrs_interp, ntwopsi, rescale_loglikelihood
+    return compute_pixel_core(
+        integrators, F, snrs_interp, 0, ntwopsi, rescale_loglikelihood
     )
-
-    # Initialize accum with the integrator evaluation
-    itwopsi_grid, iu_grid, isample_grid = jnp.meshgrid(
-        jnp.arange(ntwopsi), jnp.arange(nu), jnp.arange(snrs.shape[1]), indexing="ij"
-    )
-    itwopsi_flat = itwopsi_grid.ravel()
-    iu_flat = iu_grid.ravel()
-    isample_flat = isample_grid.ravel()
-
-    val = u_points_weights[iu_flat, 1] + integrator_eval(
-        integrators[0][0][0],
-        integrators[0][0][1],
-        integrators[0][0][2],
-        integrators[1][0],
-        p[itwopsi_flat, iu_flat],
-        b[itwopsi_flat, iu_flat, isample_flat],
-        log_p[itwopsi_flat, iu_flat],
-        log_b[itwopsi_flat, iu_flat, isample_flat],
-    )
-    accum_flat = jnp.where(jnp.isfinite(val), val, u_points_weights[iu_flat, 1])
-    accum0 = accum_flat.reshape(ntwopsi, nu, snrs.shape[1])
-    accum = jnp.array([accum0])
-
-    # Return updated accum value
-    return compute_accum(0, accum)
