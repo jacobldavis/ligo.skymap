@@ -280,7 +280,7 @@ def compute_pixel_core(
         p_broadcast = jnp.full(n_samples, p)
         logp_broadcast = jnp.full(n_samples, logp)
 
-        # Evaluate integrator: shape (nsamples,)
+        # Evaluate integrator
         val = integrator_eval(
             integrator_funcs[0],
             integrator_funcs[1],
@@ -292,7 +292,7 @@ def compute_pixel_core(
             logb,
         )
 
-        # Add quadrature weight: shape (nsamples,)
+        # Add quadrature weight
         result = jnp.where(
             jnp.isfinite(val), val + u_log_weights[u_idx], u_log_weights[u_idx]
         )
