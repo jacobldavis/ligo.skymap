@@ -260,7 +260,6 @@ def compute_pixel_core(
 
     # Compute contribution for one (twopsi, u) pair across all samples
     def compute_for_twopsi_u(twopsi_idx, u_idx):
-        """Compute contribution for one (twopsi, u) pair across all samples."""
         u = u_vals[u_idx]
         u2 = u2_vals[u_idx]
 
