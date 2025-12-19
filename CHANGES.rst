@@ -2,7 +2,24 @@
 Changelog
 #########
 
-2.4.2 (unreleased)
+2.5.2 (unreleased)
+==================
+
+- No changes yet.
+
+2.5.1 (2025-12-17)
+==================
+
+- Propagate command-line logging settings to multiprocessing subprocesses.
+
+- In the ``bayestar-inject`` script, fix incorrect setting of the low frequency
+  cutoff for horizon redshift calculation. The low frequency cutoff was
+  incorrectly set to 10 Hz rather than to the value of the ``--f-low`` command
+  line argument. If users passed a value greater than 10 Hz, then the results
+  would have been correct but the script would have taken longer to run than it
+  should have.
+
+2.5.0 (2025-12-12)
 ==================
 
 - Include a vendored copy of the ``ptemcee`` package by Will Vousden and

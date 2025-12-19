@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copied and adapted from https://github.com/willvousden/ptemcee
 #
 # The MIT License (MIT)
@@ -23,11 +22,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from __future__ import (division, print_function, absolute_import, unicode_literals)
-
 from .sampler import *
 from .interruptible_pool import InterruptiblePool
 from .mpi_pool import MPIPool
 from . import util
 
-__version__ = '1.0.0'
+__all__ = ['Sampler', 'default_beta_ladder', 'InterruptiblePool', 'MPIPool', 'util']
