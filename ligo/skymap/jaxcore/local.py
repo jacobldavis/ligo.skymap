@@ -36,8 +36,6 @@ from ligo.skymap.jaxcore.pixel import (
     bsm_pixel_prob_jax,
 )
 
-jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
-
 
 _MAX_NIFOS = 5
 _MAX_NSAMPLES = 1000
@@ -162,8 +160,8 @@ def bsm_jax(
     prior_distance_power,
     cosmology,
     gmst,
-    nifos,
-    nsamples,
+    ifo_mask,
+    sample_mask,
     sample_rate,
     epochs,
     snrs,
@@ -186,10 +184,10 @@ def bsm_jax(
         Cosmology parameters (used in distance conversions).
     gmst : float
         Greenwich Mean Sidereal Time.
-    nifos : int
-        Number of detectors.
-    nsamples : int
-        Number of SNR time samples.
+    ifo_mask : array_like
+        Mask indicating active detectors.
+    sample_mask : array_like
+        Mask indicating active SNR samples.
     sample_rate : float
         Sampling frequency in Hz.
     epochs : array_like
@@ -259,8 +257,8 @@ def bsm_jax(
             px_row[0],
             px_row,
             gmst,
-            nifos,
-            nsamples,
+            ifo_mask,
+            sample_mask,
             sample_rate,
             epochs,
             snrs,
@@ -275,8 +273,8 @@ def bsm_jax(
             integrators_values,
             px_row[0],
             gmst,
-            nifos,
-            nsamples,
+            ifo_mask,
+            sample_mask,
             sample_rate,
             lax.dynamic_slice(epochs, (iifo,), (1,)),
             lax.dynamic_slice(snrs, (iifo, 0, 0), (1, snrs.shape[1], snrs.shape[2])),
@@ -336,8 +334,8 @@ def bsm_jax(
             px[0],
             px,
             gmst,
-            nifos,
-            nsamples,
+            ifo_mask,
+            sample_mask,
             sample_rate,
             epochs,
             snrs,
@@ -385,21 +383,3 @@ def bsm_jax(
     )
 
     return pixels, log_bci, log_bsn
-
-
-compile_a, compile_b, compile_c = bsm_jax(
-    0,
-    np.array(1000.0, dtype=np.float64),
-    1,
-    False,
-    1.0,
-    _MAX_NIFOS,
-    _MAX_NSAMPLES,
-    1.0,
-    np.ones((_MAX_NIFOS), dtype=np.float32),
-    np.ones((_MAX_NIFOS, _MAX_NSAMPLES, 2), dtype=np.float32),
-    np.ones((_MAX_NIFOS, 3, 3), dtype=np.float32),
-    np.ones((_MAX_NIFOS, 3), dtype=np.float32),
-    np.ones((_MAX_NIFOS,), dtype=np.float32),
-    1.0,
-)

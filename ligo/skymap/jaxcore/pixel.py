@@ -50,7 +50,7 @@ u_points_weights = u_points_weights_init(nu)
 
 
 @jit
-def compute_F(responses, horizons, phi, theta, gmst, nifos):
+def compute_F(responses, horizons, phi, theta, gmst, ifo_mask):
     """
     Compute antenna factors from the detector response tensor and source
     sky location, and return as complex number(s) F_plus + i F_cross.
@@ -67,8 +67,8 @@ def compute_F(responses, horizons, phi, theta, gmst, nifos):
         Source polar angle.
     gmst : float
         Greenwich mean sidereal time.
-    nifos : int
-        Number of detectors.
+    ifo_mask : array_like
+        Mask indicating active detectors.
     Returns
     -------
     array
@@ -93,9 +93,7 @@ def compute_F(responses, horizons, phi, theta, gmst, nifos):
     )
 
     vals *= horizons
-
-    mask = jnp.arange(responses.shape[0]) < nifos
-    return jnp.where(mask, vals, 0)
+    return vals * ifo_mask
 
 
 @jit
@@ -148,7 +146,7 @@ def exp_i(phi):
 
 
 @jit
-def compute_snrs_interp(snrs, dt, sample_rate, nsamples):
+def compute_snrs_interp(snrs, dt, sample_rate, sample_mask):
     """
     Evaluate interpolated complex SNR.
     Parameters
@@ -159,8 +157,8 @@ def compute_snrs_interp(snrs, dt, sample_rate, nsamples):
         Time delays for each detector, shape (nifo,).
     sample_rate : float
         Sampling rate in Hz.
-    nsamples : int
-        Number of samples in the SNR time series.
+    sample_mask : array_like
+        Mask indicating active SNR samples.
     Returns
     -------
     complex
@@ -168,11 +166,13 @@ def compute_snrs_interp(snrs, dt, sample_rate, nsamples):
     """
     isamples = jnp.arange(snrs.shape[1])
 
-    tt = isamples[None, :] - dt[:, None] * sample_rate - 0.5 * (nsamples - 1)
+    tt = isamples[None, :] - dt[:, None] * sample_rate - 0.5 * (snrs.shape[1] - 1)
 
     i = jnp.floor(tt).astype(jnp.int32)
     f = jnp.float32(tt - jnp.floor(tt))
-    cond = jnp.logical_and(i >= 1, i < nsamples - 2)
+
+    valid_samples = sample_mask[i] * sample_mask[i - 1] * sample_mask[i + 1] * sample_mask[i + 2]
+    cond = (i >= 1) & (i < snrs.shape[1] - 2) & (valid_samples > 0)
 
     n_detectors = snrs.shape[0]
     detector_indices = jnp.arange(n_detectors)[:, None]
@@ -313,8 +313,8 @@ def bsm_pixel_prob_jax(
     uniq,
     px,
     gmst,
-    nifos,
-    nsamples,
+    ifo_mask,
+    sample_mask,
     sample_rate,
     epochs,
     snrs,
@@ -336,10 +336,10 @@ def bsm_pixel_prob_jax(
         Pixel row to modify.
     gmst : float
         Greenwich Mean Sidereal Time.
-    nsamples : int
-        Number of SNR time samples.
-    nifos : int
-        Number of detectors.
+    ifo_mask : array_like
+        Mask indicating active detectors.
+    sample_mask : array_like
+        Mask indicating active SNR samples.
     sample_rate : float
         Sampling rate in Hz.
     epochs : array_like
@@ -362,9 +362,9 @@ def bsm_pixel_prob_jax(
 
     """
     theta, phi = uniq2ang64(uniq)
-    F = compute_F(responses, horizons, phi, theta, gmst, nifos)
+    F = compute_F(responses, horizons, phi, theta, gmst, ifo_mask)
     dt = toa_errors(theta, phi, gmst, locations, epochs)
-    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
+    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, sample_mask)
 
     result = compute_pixel_core(
         integrators, F, snrs_interp, 0, ntwopsi, rescale_loglikelihood
@@ -379,8 +379,8 @@ def bsm_pixel_dist_jax(
     uniq,
     px,
     gmst,
-    nifos,
-    nsamples,
+    ifo_mask,
+    sample_mask,
     sample_rate,
     epochs,
     snrs,
@@ -402,10 +402,10 @@ def bsm_pixel_dist_jax(
         Pixel row to modify.
     gmst : float
         Greenwich Mean Sidereal Time.
-    nifos : int
-        Number of detectors.
-    nsamples : int
-        Number of SNR time samples.
+    ifo_mask : array_like
+        Mask indicating active detectors.
+    sample_mask : array_like
+        Mask indicating active SNR samples.
     sample_rate : float
         Sampling rate in Hz.
     epochs : array_like
@@ -428,9 +428,9 @@ def bsm_pixel_dist_jax(
 
     """
     theta, phi = uniq2ang64(uniq)
-    F = compute_F(responses, horizons, phi, theta, gmst, nifos)
+    F = compute_F(responses, horizons, phi, theta, gmst, ifo_mask)
     dt = toa_errors(theta, phi, gmst, locations, epochs)
-    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
+    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, sample_mask)
 
     result1 = compute_pixel_core(
         integrators, F, snrs_interp, 1, ntwopsi, rescale_loglikelihood
@@ -449,8 +449,8 @@ def bsm_pixel_accum_jax(
     integrators,
     uniq,
     gmst,
-    nifos,
-    nsamples,
+    ifo_mask,
+    sample_mask,
     sample_rate,
     epochs,
     snrs,
@@ -474,10 +474,10 @@ def bsm_pixel_accum_jax(
         Pixel row to modify.
     gmst : float
         Greenwich Mean Sidereal Time.
-    nifos : int
-        Number of detectors.
-    nsamples : int
-        Number of SNR time samples.
+    ifo_mask : array_like
+        Mask indicating active detectors.
+    sample_mask : array_like
+        Mask indicating active SNR samples.
     sample_rate : float
         Sampling rate in Hz.
     epochs : array_like
@@ -499,9 +499,9 @@ def bsm_pixel_accum_jax(
 
     """
     theta, phi = uniq2ang64(uniq)
-    F = compute_F(responses, horizons, phi, theta, gmst, nifos)
+    F = compute_F(responses, horizons, phi, theta, gmst, ifo_mask)
     dt = toa_errors(theta, phi, gmst, locations, epochs)
-    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, nsamples)
+    snrs_interp = compute_snrs_interp(snrs, dt, sample_rate, sample_mask)
 
     return compute_pixel_core(
         integrators, F, snrs_interp, 0, ntwopsi, rescale_loglikelihood

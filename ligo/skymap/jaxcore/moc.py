@@ -146,12 +146,11 @@ def build_ctab():
 
 @jit
 def split_64bit(val):
-    """Split a 64-bit integer into two 32-bit parts.
+    """Split an integer into two parts
 
     Parameters
     ----------
-    val : uint64
-        64-bit input value.
+    val : integer to split
 
     Returns
     -------
@@ -161,19 +160,19 @@ def split_64bit(val):
         high : uint32
             Upper 32 bits.
     """
-    val = jnp.uint64(val)
-    low = jnp.uint32(val & jnp.uint64(0xFFFFFFFF))
-    high = jnp.uint32((val >> 32) & jnp.uint64(0xFFFFFFFF))
+    val = jnp.asarray(val, dtype=jnp.uint32) 
+    low = val
+    high = jnp.uint32(0)
     return low, high
 
 
 @jit
 def compress_bits64(v, ctab):
-    """Compress bits from a 64-bit integer using a lookup table.
+    """Compress bits from an integer using a lookup table.
 
     Parameters
     ----------
-    v : uint64
+    v : int
         Pixel index.
     ctab : array_like
         Compression table built from `build_ctab`.
