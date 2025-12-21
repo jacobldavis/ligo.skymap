@@ -48,6 +48,7 @@ from ..util.numpy import require_contiguous_aligned
 from ..util.stopwatch import Stopwatch
 from . import filter
 from .ez_emcee import ez_emcee
+import time
 
 __all__ = (
     "derasterize",
@@ -482,6 +483,9 @@ def localize(
         )
     elif enable_jax:
         # Import JAX localize
+        import jax
+        jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+        jax.config.update("jax_persistent_cache_enable_xla_caches", "true")
         from ..jaxcore.local import _MAX_NIFOS, _MAX_NSAMPLES, bsm_jax
 
         # Add padding to use the compiled function
@@ -503,6 +507,12 @@ def localize(
         horizons_padded = np.zeros((_MAX_NIFOS,), dtype=np.float32)
         horizons_padded[:nifos] = horizons
 
+        ifo_mask = np.zeros((_MAX_NIFOS,), dtype=np.float32)
+        ifo_mask[:nifos] = 1.0
+
+        sample_mask = np.zeros((_MAX_NSAMPLES,), dtype=np.float32)
+        sample_mask[:nsamples] = 1.0
+
         # Perform sky map calculation
         skymap, log_bci, log_bsn = bsm_jax(
             min_distance,
@@ -510,8 +520,8 @@ def localize(
             prior_distance_power,
             cosmology,
             gmst,
-            nifos,
-            nsamples,
+            ifo_mask,
+            sample_mask,
             sample_rate,
             epochs_padded,
             snrs_padded,
