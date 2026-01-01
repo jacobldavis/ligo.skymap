@@ -17,9 +17,7 @@
 
 from functools import partial
 
-import jax
 import jax.numpy as jnp
-import numpy as np
 from jax import jit, lax, vmap
 
 from ligo.skymap.jaxcore.integrate import integrator_eval, integrator_init
@@ -35,7 +33,6 @@ from ligo.skymap.jaxcore.pixel import (
     bsm_pixel_dist_jax,
     bsm_pixel_prob_jax,
 )
-
 
 _MAX_NIFOS = 5
 _MAX_NSAMPLES = 1000
@@ -376,7 +373,7 @@ def bsm_jax(
     # Sort pixels by ascending NUNIQ index
     pixels = bayestar_pixels_sort_uniq(pixels)
 
-    # Calculate log Bayes factor and return
+    # Calculate log Bayes factor and return results
     log_bci = log_bsn = log_evidence_coherent
     log_bci -= jnp.sum(
         vmap(lambda i: log_evidence_incoherent[i])(jnp.arange(epochs.shape[0]))
