@@ -481,8 +481,9 @@ def localize(
             chain_dump=chain_dump,
         )
     elif enable_jax:
-        # Import JAX localize
+        # Import JAX localize and set up cache
         import jax
+
         jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
         jax.config.update("jax_persistent_cache_enable_xla_caches", "true")
         from ..jaxcore.local import _MAX_NIFOS, _MAX_NSAMPLES, bsm_jax
