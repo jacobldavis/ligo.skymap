@@ -418,19 +418,3 @@ def bsm_jax(
     return pixels, log_bci, log_bsn
 
 
-compile_a, compile_b, compile_c = bsm_jax(
-    0,
-    np.array(1000.0, dtype=np.float64),
-    1,
-    False,
-    1.0,
-    _MAX_NIFOS,
-    _MAX_NSAMPLES,
-    1.0,
-    np.ones((_MAX_NIFOS), dtype=np.float32),
-    np.ones((_MAX_NIFOS, _MAX_NSAMPLES, 2), dtype=np.float32),
-    np.ones((_MAX_NIFOS, 3, 3), dtype=np.float32),
-    np.ones((_MAX_NIFOS, 3), dtype=np.float32),
-    np.ones((_MAX_NIFOS,), dtype=np.float32),
-    1.0,
-)
