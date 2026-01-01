@@ -299,8 +299,11 @@ def compute_pixel_core(
         return compute_accum_logsumexp(result)
 
     # Vectorize over u and twopsi
-    compute_u = vmap(lambda u_idx: compute_for_twopsi_u(0, u_idx))
-    compute_twopsi_u = vmap(lambda twopsi_idx: compute_u(jnp.arange(nu)), in_axes=(0,))
+    compute_twopsi_u = vmap(
+        lambda twopsi_idx: vmap(
+            lambda u_idx: compute_for_twopsi_u(twopsi_idx, u_idx)
+        )(jnp.arange(nu))
+    )
 
     # Return final accumulated log-sum-exp
     accum_reduced = compute_twopsi_u(jnp.arange(ntwopsi))
