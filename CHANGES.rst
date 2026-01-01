@@ -2,10 +2,16 @@
 Changelog
 #########
 
-2.5.2 (unreleased)
+2.5.3 (unreleased)
 ==================
 
 - No changes yet.
+
+2.5.2 (2025-12-20)
+==================
+
+- Fix a bug in progress_map_vectorized that was introduced in the version
+  2.5.1. The bug caused the function to hang when using multiprocessing.
 
 2.5.1 (2025-12-17)
 ==================
