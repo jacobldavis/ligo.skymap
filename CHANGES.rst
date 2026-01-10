@@ -2,10 +2,15 @@
 Changelog
 #########
 
-2.5.3 (unreleased)
+2.5.4 (unreleased)
 ==================
 
 - No changes yet.
+
+2.5.3 (2026-01-07)
+==================
+
+- Parallelize more sections of ``bayestar-inject``.
 
 2.5.2 (2025-12-20)
 ==================
