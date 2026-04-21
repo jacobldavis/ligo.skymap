@@ -690,7 +690,7 @@ class AutoScaledWCSAxes(WCSAxes):
         hdu_in, order, nested, field, smooth :
             Extra arguments for `reproject.reproject_from_healpix`
         kwargs :
-            Extra keyword arguments for `matplotlib.axes.Axes.contour`
+            Extra keyword arguments for `matplotlib.axes.Axes.imshow`
 
         Returns
         -------
