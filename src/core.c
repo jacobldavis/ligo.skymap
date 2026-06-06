@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2025  Leo Singer
+ * Copyright (C) 2013-2026  Leo Singer
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -57,6 +57,11 @@
 #ifndef PYPY_VERSION
 struct _typeobject {};
 #endif
+
+
+typedef struct {
+    PyObject *sky_map_descr;
+} m_state;
 
 
 static PyObject *itt_pause(PyObject *NPY_UNUSED(module), void *NPY_UNUSED(args))
@@ -891,9 +896,11 @@ static PyObject *sky_map_toa_phoa_snr(
     if (!capsule)
         goto fail;
 
-    PyArray_Descr *sky_map_descr = (PyArray_Descr *) PyObject_GetAttrString(module, "sky_map_descr");
-    if (!sky_map_descr)
+    m_state *state = PyModule_GetState(module);
+    if (!state || !state->sky_map_descr)
         goto fail;
+    Py_INCREF(state->sky_map_descr);
+    PyArray_Descr *sky_map_descr = (PyArray_Descr *) state->sky_map_descr;
 
     npy_intp dims[] = {len};
     out = PyArray_NewFromDescr(&PyArray_Type,
@@ -1112,60 +1119,32 @@ static const char double_ufunc_types[] = {
                       NPY_CFLOAT, NPY_CFLOAT, NPY_FLOAT,
                       NPY_FLOAT, NPY_CFLOAT};
 
-static PyModuleDef moduledef = {
-    .m_base = PyModuleDef_HEAD_INIT,
-    .m_name = "core",
-    .m_methods = (PyMethodDef []) {
-        {"itt_pause", (PyCFunction)itt_pause,
-            METH_NOARGS, "fill me in"},
-        {"itt_resume", (PyCFunction)itt_resume,
-            METH_NOARGS, "fill me in"},
-        {"get_num_threads", (PyCFunction)get_num_threads,
-            METH_NOARGS, "fill me in"},
-        {"set_num_threads", (PyCFunction)set_num_threads,
-            METH_O, "fill me in"},
-        {"rasterize", (PyCFunction)rasterize,
-            METH_VARARGS | METH_KEYWORDS, "fill me in"},
-        {"toa_phoa_snr", (PyCFunction)sky_map_toa_phoa_snr,
-            METH_VARARGS | METH_KEYWORDS, "fill me in"},
-        {"test", (PyCFunction)test,
-            METH_NOARGS, "fill me in"},
-        {/* terminal element, all NULL */}
-    }
-};
+static int m_traverse(PyObject *self, visitproc visit, void *arg) {
+    m_state *state = PyModule_GetState(self);
+    if (!state) return -1;
+    Py_VISIT(state->sky_map_descr);
+    return 0;
+}
 
+static int m_clear(PyObject *self) {
+    m_state *state = PyModule_GetState(self);
+    if (!state) return -1;
+    Py_CLEAR(state->sky_map_descr);
+    return 0;
+}
 
 #define MODULE_ADD_OBJECT(name, objinit) do { \
-    PyObject *obj = (objinit); \
-    if (!obj) \
-    { \
-        Py_DECREF(module); \
-        return NULL; \
-    } \
-    if (PyModule_AddObject(module, (name), obj) < 0) \
-    { \
-        Py_DECREF(obj); \
-        Py_DECREF(module); \
-        return NULL; \
-    } \
+    if (PyModule_AddObjectRef(module, (name), (objinit))) \
+        return -1; \
 } while(0)
 
-
-PyMODINIT_FUNC PyInit_core(void); /* Silence -Wmissing-prototypes */
-PyMODINIT_FUNC PyInit_core(void)
-{
-    PyObject *module;
-
+static int m_exec(PyObject *module) {
     gsl_set_error_handler_off();
-    import_array();
-    import_umath();
 
-    module = PyModule_Create(&moduledef);
-    if (!module)
-        return NULL;
-
-    MODULE_ADD_OBJECT(
-        "sky_map_descr", (PyObject *) sky_map_create_descr());
+    m_state *state = PyModule_GetState(module);
+    if (!state) return -1;
+    state->sky_map_descr = (PyObject *) sky_map_create_descr();
+    if (!state->sky_map_descr) return -1;
 
     MODULE_ADD_OBJECT(
         "log_posterior_toa_phoa_snr", PyUFunc_FromFuncAndDataAndSignature(
@@ -1275,5 +1254,42 @@ PyMODINIT_FUNC PyInit_core(void)
             signal_amplitude_model_ufunc_types, 1, 4, 1, PyUFunc_None,
             "signal_amplitude_model", NULL, 0));
 
-    return module;
+    return 0;
+}
+
+static PyModuleDef moduledef = {
+    .m_base = PyModuleDef_HEAD_INIT,
+    .m_name = "core",
+    .m_size = sizeof(m_state),
+    .m_traverse = m_traverse,
+    .m_clear = m_clear,
+    .m_slots = (PyModuleDef_Slot []) {
+        {Py_mod_exec, m_exec},
+        {/* terminal element, all NULL */}
+    },
+    .m_methods = (PyMethodDef []) {
+        {"itt_pause", (PyCFunction)itt_pause,
+            METH_NOARGS, "fill me in"},
+        {"itt_resume", (PyCFunction)itt_resume,
+            METH_NOARGS, "fill me in"},
+        {"get_num_threads", (PyCFunction)get_num_threads,
+            METH_NOARGS, "fill me in"},
+        {"set_num_threads", (PyCFunction)set_num_threads,
+            METH_O, "fill me in"},
+        {"rasterize", (PyCFunction)rasterize,
+            METH_VARARGS | METH_KEYWORDS, "fill me in"},
+        {"toa_phoa_snr", (PyCFunction)sky_map_toa_phoa_snr,
+            METH_VARARGS | METH_KEYWORDS, "fill me in"},
+        {"test", (PyCFunction)test,
+            METH_NOARGS, "fill me in"},
+        {/* terminal element, all NULL */}
+    }
+};
+
+PyMODINIT_FUNC PyInit_core(void); /* Silence -Wmissing-prototypes */
+PyMODINIT_FUNC PyInit_core(void)
+{
+    import_array();
+    import_umath();
+    return PyModuleDef_Init(&moduledef);
 }

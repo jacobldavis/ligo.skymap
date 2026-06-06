@@ -2,10 +2,17 @@
 Changelog
 #########
 
-2.5.4 (unreleased)
+2.5.5 (unreleased)
 ==================
 
 - No changes yet.
+
+2.5.4 (2026-06-06)
+==================
+
+- Run tests for Python 3.14.
+
+- Fix support for Numpy 2.5.0, which removed some deprecated APIs.
 
 2.5.3 (2026-01-07)
 ==================

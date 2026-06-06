@@ -232,7 +232,7 @@ intersphinx_mapping.update(  # noqa: F405
         "gracedb": ("https://gracedb.ligo.org/documentation/", None),
         "gsl": ("https://www.gnu.org/software/gsl/doc/html/", None),
         "gwcelery": ("https://gwcelery.readthedocs.io/en/latest/", None),
-        "gwpy": ("https://gwpy.github.io/docs/latest/", None),
+        "gwpy": ("https://gwpy.readthedocs.io/en/stable/", None),
         "igwn-ligolw": ("https://igwn-ligolw.readthedocs.io/en/latest/", None),
         "pytest": ("https://docs.pytest.org/en/latest/", None),
         "reproject": ("https://reproject.readthedocs.io/en/stable/", None),
